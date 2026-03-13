@@ -4,3 +4,4 @@ streamlit-folium
 pykml
 pandas
 lxml
+geopy
