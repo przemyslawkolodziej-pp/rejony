@@ -50,3 +50,65 @@ def parse_kml(file):
                     "lng": float(coords[0])
                 })
         return pd.DataFrame(points)
+    except Exception as e:
+        st.error(f"Błąd podczas czytania pliku: {e}")
+        return None
+
+# 4. Główna sekcja wyświetlania
+if uploaded_file:
+    df = parse_kml(uploaded_file)
+    
+    if df is not None and not df.empty:
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.subheader("📋 Lista punktów")
+            st.write(f"Znaleziono punktów: **{len(df)}**")
+            st.dataframe(df[['name']], use_container_width=True, height=400)
+            
+        with col2:
+            st.subheader("🗺️ Podgląd mapy")
+            
+            # Centrowanie mapy na średnich współrzędnych
+            m = folium.Map(location=[df.lat.mean(), df.lng.mean()], zoom_start=10)
+            
+            # Dodawanie pinezek na mapę
+            for _, row in df.iterrows():
+                # Logika kolorów ikon
+                icon_color = 'blue'
+                if row['name'].lower() == start_point.lower():
+                    icon_color = 'green'
+                elif row['name'].lower() == end_point.lower():
+                    icon_color = 'red'
+                
+                folium.Marker(
+                    [row.lat, row.lng], 
+                    popup=row['name'],
+                    tooltip=row['name'],
+                    icon=folium.Icon(color=icon_color, icon='info-sign')
+                ).addTo(m)
+            
+            # Logika po kliknięciu przycisku optymalizacji
+            if optimize_btn:
+                st.info("Algorytm optymalizacji (TSP) zostanie uruchomiony tutaj.")
+                # Na razie rysujemy linię w kolejności z pliku jako demonstrację
+                folium.PolyLine(
+                    df[['lat', 'lng']].values, 
+                    color="royalblue", 
+                    weight=4, 
+                    opacity=0.7,
+                    dash_array='10'
+                ).addTo(m)
+                
+                st.success("Trasa została wyznaczona (podgląd kolejności z pliku).")
+            
+            # Wyświetlenie mapy w Streamlit
+            st_folium(m, width="100%", height=500)
+    else:
+        st.warning("Plik KML nie zawiera poprawnych punktów geograficznych.")
+else:
+    st.info("👈 Zacznij od wgrania pliku KML w panelu bocznym.")
+
+# 5. Stopka
+st.divider()
+st.caption("Aplikacja stworzona do optymalizacji logistyki. Dane nie są zapisywane na serwerze.")
