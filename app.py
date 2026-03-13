@@ -1,114 +1,84 @@
 import streamlit as st
+import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from pykml import parser
-import pandas as pd
+from geopy.geocoders import Nominatim
+import re
+import time
+import math
 
-# 1. Konfiguracja strony (musi być na samym początku kodu)
-st.set_page_config(
-    page_title="Optymalizator Tras KML",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- KONFIGURACJA STRONY ---
+st.set_page_config(page_title="Optymalizator Kurierski", layout="wide")
 
-st.title("📍 Mój Optymalizator Tras z Google My Maps")
-st.markdown("""
-Ta aplikacja pozwala wczytać plik KML z Twoimi pinezkami, wyświetlić je na mapie i w przyszłości wyznaczyć najkrótszą drogę.
-""")
+st.title("🚚 Optymalizator Trasy: Szczawin Kościelny i okolice")
+st.markdown("Aplikacja wyciąga adresy z pliku KML, znajduje ich współrzędne i układa najkrótszą trasę.")
 
-# 2. Panel boczny (Sidebar)
-with st.sidebar:
-    st.header("⚙️ Ustawienia")
-    uploaded_file = st.file_uploader("Wgraj plik KML wyeksportowany z Google", type=['kml'])
-    
-    st.divider()
-    
-    start_point = st.text_input("Nazwa punktu START (np. Dom)", "Start")
-    end_point = st.text_input("Nazwa punktu META (np. Magazyn)", "Meta")
-    
-    st.divider()
-    
-    optimize_btn = st.button("🚀 Oblicz optymalną trasę", type="primary")
+# --- FUNKCJE POMOCNICZE ---
 
-# 3. Funkcja do przetwarzania pliku KML
-def parse_kml(file):
-    try:
-        root = parser.parse(file).getroot()
-        points = []
-        # Standardowa przestrzeń nazw dla plików KML z Google
-        ns = {'kml': 'http://www.opengis.net/kml/2.2'}
+def parse_addresses_from_kml(file_content):
+    """Wyciąga dane adresowe z tagów ExtendedData w pliku KML."""
+    # Szukamy wartości dla konkretnych pól adresowych
+    pnas = re.findall(r'<Data name="PNA_DORECZ">\s*<value>(.*?)</value>', file_content)
+    miejsca = re.findall(r'<Data name="MIEJSC_DORECZ">\s*<value>(.*?)</value>', file_content)
+    ulice = re.findall(r'<Data name="ULICA_DORECZ">\s*<value>(.*?)</value>', file_content)
+    numery = re.findall(r'<Data name="NR_DOM_DORECZ">\s*<value>(.*?)</value>', file_content)
+    
+    data = []
+    for p, m, u, n in zip(pnas, miejsca, ulice, numery):
+        # Budujemy pełny adres do geokodowania
+        full_addr = f"{u} {n}, {p} {m}, Polska"
+        display_name = f"{m}, ul. {u} {n}"
+        data.append({"address": full_addr, "display_name": display_name})
+    
+    return pd.DataFrame(data)
+
+def geocode_points(df):
+    """Zamienia adresy tekstowe na współrzędne geograficzne."""
+    geolocator = Nominatim(user_agent="my_route_optimizer_app_v2")
+    lats, lngs = [], []
+    
+    progress_text = "Trwa geokodowanie adresów... Proszę czekać."
+    my_bar = st.progress(0, text=progress_text)
+    
+    for i, row in df.iterrows():
+        try:
+            # Opóźnienie 1s, aby nie zablokowali nam dostępu (wymóg darmowego serwera)
+            time.sleep(1.1)
+            location = geolocator.geocode(row['address'])
+            if location:
+                lats.append(location.latitude)
+                lngs.append(location.longitude)
+            else:
+                lats.append(None)
+                lngs.append(None)
+        except:
+            lats.append(None)
+            lngs.append(None)
         
-        # Szukanie wszystkich Placemarków (pinezek)
-        for pm in root.xpath('.//kml:Placemark', namespaces=ns):
-            name = str(pm.name) if hasattr(pm, 'name') else "Bez nazwy"
-            # Wyciąganie współrzędnych (longitude, latitude, altitude)
-            if hasattr(pm, 'Point') and hasattr(pm.Point, 'coordinates'):
-                coords = str(pm.Point.coordinates).strip().split(',')
-                points.append({
-                    "name": name,
-                    "lat": float(coords[1]),
-                    "lng": float(coords[0])
-                })
-        return pd.DataFrame(points)
-    except Exception as e:
-        st.error(f"Błąd podczas czytania pliku: {e}")
-        return None
-
-# 4. Główna sekcja wyświetlania
-if uploaded_file:
-    df = parse_kml(uploaded_file)
+        my_bar.progress((i + 1) / len(df), text=f"Znaleziono {i+1} z {len(df)} adresów")
     
-    if df is not None and not df.empty:
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.subheader("📋 Lista punktów")
-            st.write(f"Znaleziono punktów: **{len(df)}**")
-            st.dataframe(df[['name']], use_container_width=True, height=400)
-            
-        with col2:
-            st.subheader("🗺️ Podgląd mapy")
-            
-            # Centrowanie mapy na średnich współrzędnych
-            m = folium.Map(location=[df.lat.mean(), df.lng.mean()], zoom_start=10)
-            
-            # Dodawanie pinezek na mapę
-            for _, row in df.iterrows():
-                # Logika kolorów ikon
-                icon_color = 'blue'
-                if row['name'].lower() == start_point.lower():
-                    icon_color = 'green'
-                elif row['name'].lower() == end_point.lower():
-                    icon_color = 'red'
-                
-                folium.Marker(
-                    [row.lat, row.lng], 
-                    popup=row['name'],
-                    tooltip=row['name'],
-                    icon=folium.Icon(color=icon_color, icon='info-sign')
-                ).addTo(m)
-            
-            # Logika po kliknięciu przycisku optymalizacji
-            if optimize_btn:
-                st.info("Algorytm optymalizacji (TSP) zostanie uruchomiony tutaj.")
-                # Na razie rysujemy linię w kolejności z pliku jako demonstrację
-                folium.PolyLine(
-                    df[['lat', 'lng']].values, 
-                    color="royalblue", 
-                    weight=4, 
-                    opacity=0.7,
-                    dash_array='10'
-                ).addTo(m)
-                
-                st.success("Trasa została wyznaczona (podgląd kolejności z pliku).")
-            
-            # Wyświetlenie mapy w Streamlit
-            st_folium(m, width="100%", height=500)
-    else:
-        st.warning("Plik KML nie zawiera poprawnych punktów geograficznych.")
-else:
-    st.info("👈 Zacznij od wgrania pliku KML w panelu bocznym.")
+    df['lat'] = lats
+    df['lng'] = lngs
+    return df.dropna(subset=['lat', 'lng']).reset_index(drop=True)
 
-# 5. Stopka
-st.divider()
-st.caption("Aplikacja stworzona do optymalizacji logistyki. Dane nie są zapisywane na serwerze.")
+def calculate_distance(p1, p2):
+    """Prosta odległość euklidesowa (wystarczy na małe obszary)."""
+    return math.sqrt((p1['lat'] - p2['lat'])**2 + (p1['lng'] - p2['lng'])**2)
+
+def optimize_route(df, start_index):
+    """Algorytm Najbliższego Sąsiada (Nearest Neighbor)."""
+    unvisited = df.to_dict('records')
+    route = []
+    
+    # Wybieramy punkt startowy
+    current = unvisited.pop(start_index)
+    route.append(current)
+    
+    while unvisited:
+        # Znajdź najbliższy punkt z pozostałych
+        next_node = min(unvisited, key=lambda x: calculate_distance(current, x))
+        route.append(next_node)
+        unvisited.remove(next_node)
+        current = next_node
+        
+    return pd.
