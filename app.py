@@ -134,11 +134,26 @@ with st.sidebar.expander("📍 Punkty Stałe (Bazy)", expanded=False):
     for n, a in st.session_state['saved_locations'].items():
         st.write(f"**{n}**")
         c1, c2, c3 = st.columns([1, 1, 0.6])
-        if c1.button(f"Start", key=f"s_{n}"): st.session_state['start_addr'] = a
-        if c2.button(f"Meta", key=f"m_{n}"): st.session_state['meta_addr'] = a
+        
+        # Logika przycisku START
+        if c1.button(f"Start", key=f"s_{n}"):
+            st.session_state['start_addr'] = a
+            st.toast(f"🚀 Ustawiono {n} jako START") # Małe powiadomienie w rogu
+            st.rerun()
+            
+        # Logika przycisku META
+        if c2.button(f"Meta", key=f"m_{n}"):
+            st.session_state['meta_addr'] = a
+            st.toast(f"🏁 Ustawiono {n} jako METĘ") # Małe powiadomienie w rogu
+            st.rerun()
+            
         if c3.button("🗑️", key=f"d_{n}"):
             del st.session_state['saved_locations'][n]
             st.rerun()
+
+    # Wizualny wskaźnik aktualnego wyboru (opcjonalnie)
+    if st.session_state['start_addr'] or st.session_state['meta_addr']:
+        st.info(f"Wybrano: \nS: {st.session_state['start_addr'][:20]}... \nM: {st.session_state['meta_addr'][:20]}...")
 
 # 4. SEKCOJA: KOPIA ZAPASOWA (PRZENIESIONA NIŻEJ)
 with st.sidebar.expander("💾 Kopia zapasowa danych", expanded=False):
