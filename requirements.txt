@@ -3,6 +3,3 @@ pandas
 folium
 streamlit-folium
 geopy
-pyyaml
-streamlit-authenticator
-pykml
