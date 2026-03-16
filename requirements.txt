@@ -1,7 +1,8 @@
 streamlit
+pandas
 folium
 streamlit-folium
-pykml
-pandas
-lxml
 geopy
+pyyaml
+streamlit-authenticator
+pykml
