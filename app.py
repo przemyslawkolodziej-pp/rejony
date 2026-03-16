@@ -54,13 +54,13 @@ def geocode_single(address, geolocator):
     except: return None, None
 
 # --- SIDEBAR: ZARZĄDZANIE PIGUŁKAMI ---
-st.sidebar.header("📍 Twoje Pigułki (Bazy)")
+st.sidebar.header("📍 Twoje Punkty")
 
 # Dodawanie nowej pigułki
-with st.sidebar.expander("➕ Dodaj nową pigułkę"):
-    new_name = st.text_input("Nazwa (np. Biuro):")
+with st.sidebar.expander("➕ Dodaj nowy punkt"):
+    new_name = st.text_input("Nazwa (np. WER Warszawa):")
     new_addr = st.text_input("Adres:")
-    if st.button("Zapisz pigułkę"):
+    if st.button("Zapisz punkt"):
         if new_name and new_addr:
             st.session_state['saved_locations'][new_name] = new_addr
             st.rerun()
