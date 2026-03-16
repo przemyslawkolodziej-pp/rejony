@@ -8,29 +8,23 @@ import time
 import math
 import json
 
-# --- 1. BEZPIECZNY SYSTEM LOGOWANIA ---
-
+# --- 1. BEZPIECZNY SYSTEM LOGOWANIA (Pamięć tylko w sesji) ---
 def logout():
     st.session_state['authenticated'] = False
     st.rerun()
 
-# Inicjalizacja stanu autoryzacji
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
-# Ekran logowania
 if not st.session_state['authenticated']:
     st.set_page_config(page_title="Logowanie", page_icon="🔐")
     st.title("🔐 Dostęp chroniony")
-    
     with st.form("login_form"):
         pwd_input = st.text_input("Wpisz hasło dostępu:", type="password")
         submit_button = st.form_submit_button("Zaloguj")
-        
         if submit_button:
             if "password" in st.secrets:
                 if pwd_input == st.secrets["password"]:
-                    # Sukces: ustawiamy flagę tylko w pamięci serwera (session_state)
                     st.session_state['authenticated'] = True
                     st.rerun()
                 else:
@@ -38,8 +32,6 @@ if not st.session_state['authenticated']:
             else:
                 st.error("Błąd: Skonfiguruj hasło w 'Secrets'.")
     st.stop()
-
-# Jeśli kod dojdzie tutaj, oznacza to, że użytkownik przeszedł przez st.form powyżej
 
 # --- 2. GŁÓWNA LOGIKA APLIKACJI ---
 
@@ -51,7 +43,16 @@ st.markdown("""
     html, body, [class*="css"] { font-size: 14px; }
     .stTextInput label, .stSelectbox label, .stFileUploader label { font-size: 12px !important; margin-bottom: 2px; }
     input { font-size: 13px !important; padding: 5px !important; }
-    .stButton button { font-size: 12px !important; padding: 2px 10px !important; min-height: 30px !important; width: 100%; }
+    
+    /* Przyciski S/M - dostosowanie pod dłuższy tekst */
+    .stButton button { 
+        font-size: 11px !important; 
+        padding: 4px 2px !important; 
+        line-height: 1.2 !important;
+        min-height: 45px !important; 
+        width: 100%; 
+    }
+    
     div[data-testid="column"] { display: flex; align-items: center; justify-content: center; gap: 5px; }
     .logout-btn button { background-color: #ff4b4b !important; color: white !important; font-weight: bold; }
     .selection-info { font-size: 13px; color: #1e1e1e; background-color: #e8f0fe; padding: 12px; border-radius: 8px; border-left: 6px solid #4285f4; margin-bottom: 10px; }
@@ -96,7 +97,6 @@ def geocode_single(address, geolocator):
 
 # --- PANEL BOCZNY (SIDEBAR) ---
 
-# 1. SEKCOJA: KONFIGURACJA TRASY (Bez pól tekstowych)
 with st.sidebar.expander("🚀 Konfiguracja Trasy", expanded=True):
     st.markdown(f"""
     <div class="selection-info">
@@ -119,7 +119,6 @@ with st.sidebar.expander("🚀 Konfiguracja Trasy", expanded=True):
         if 'optimized' in st.session_state: del st.session_state['optimized']
         st.rerun()
 
-# 2. SEKCOJA: BAZY (Przyciski S / M)
 with st.sidebar.expander("📍 Twoje Bazy", expanded=False):
     with st.form("add_base_form", clear_on_submit=True):
         n_n = st.text_input("Nazwa (np. WER):")
@@ -132,13 +131,13 @@ with st.sidebar.expander("📍 Twoje Bazy", expanded=False):
     st.divider()
     for n, a in st.session_state['saved_locations'].items():
         st.write(f"**{n}**")
-        c1, c2, c3 = st.columns([1, 1, 0.6])
-        if c1.button(f"S", key=f"s_{n}"):
+        c1, c2, c3 = st.columns([1, 1, 0.4])
+        if c1.button(f"Ustaw jako punkt Startu", key=f"s_{n}"):
             st.session_state['start_addr'] = a
             st.session_state['start_name'] = n
             st.toast(f"Ustawiono START: {n}")
             st.rerun()
-        if c2.button(f"M", key=f"m_{n}"):
+        if c2.button(f"Ustaw jako punkt Mety", key=f"m_{n}"):
             st.session_state['meta_addr'] = a
             st.session_state['meta_name'] = n
             st.toast(f"Ustawiono METĘ: {n}")
@@ -147,7 +146,6 @@ with st.sidebar.expander("📍 Twoje Bazy", expanded=False):
             del st.session_state['saved_locations'][n]
             st.rerun()
 
-# 3. SEKCOJA: PROJEKTY
 with st.sidebar.expander("📁 Zapisane Projekty", expanded=False):
     p_name = st.text_input("Nazwa projektu:")
     if st.button("Zapisz bieżący stan"):
@@ -178,7 +176,6 @@ with st.sidebar.expander("📁 Zapisane Projekty", expanded=False):
             del st.session_state['projects'][sel_p]
             st.rerun()
 
-# 4. SEKCOJA: KOPIA ZAPASOWA
 with st.sidebar.expander("💾 Kopia zapasowa", expanded=False):
     full_export = {
         "saved_locations": st.session_state['saved_locations'],
