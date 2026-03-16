@@ -12,156 +12,136 @@ st.set_page_config(page_title="Optymalizator Tras", layout="wide")
 
 st.title("Optymalizator Tras")
 
+# --- INICJALIZACJA PAMIĘCI ---
+if 'saved_locations' not in st.session_state:
+    # Możesz tutaj dopisać swoje stałe punkty na start
+    st.session_state['saved_locations'] = {
+        "Dom": "Twoja Ulica 1, 00-000 Miasto",
+        "Magazyn": "Przemysłowa 10, 00-000 Miasto"
+    }
+if 'data' not in st.session_state:
+    st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng', 'ready'])
+if 'start_addr' not in st.session_state:
+    st.session_state['start_addr'] = ""
+if 'meta_addr' not in st.session_state:
+    st.session_state['meta_addr'] = ""
+
 # --- FUNKCJE POMOCNICZE ---
 
-def parse_any_kml(file_content):
-    pnas = re.findall(r'<Data name=".*?PNA.*?">\s*<value>(.*?)</value>', file_content, re.IGNORECASE)
-    miejsca = re.findall(r'<Data name=".*?MIEJSC.*?">\s*<value>(.*?)</value>', file_content, re.IGNORECASE)
-    ulice = re.findall(r'<Data name=".*?ULICA.*?">\s*<value>(.*?)</value>', file_content, re.IGNORECASE)
-    numery = re.findall(r'<Data name=".*?NR_DOM.*?">\s*<value>(.*?)</value>', file_content, re.IGNORECASE)
-    
+def parse_kml_smart(file_content):
+    placemarks = re.findall(r'<Placemark>(.*?)</Placemark>', file_content, re.DOTALL)
     data = []
-    if miejsca:
-        for p, m, u, n in zip(pnas, miejsca, ulice, numery):
-            full_addr = f"{u} {n}, {p} {m}, Polska"
-            display_name = f"{m}, {u} {n}"
-            data.append({"address": full_addr, "display_name": display_name})
-    else:
-        names = re.findall(r'<Placemark>.*?<name>(.*?)</name>', file_content, re.DOTALL)
-        data = [{"address": n, "display_name": n} for n in names]
-    
+    for pm in placemarks:
+        name = re.search(r'<name>(.*?)</name>', pm)
+        name = name.group(1) if name else "Punkt"
+        coords = re.search(r'<coordinates>\s*([\d\.]+),\s*([\d\.]+)', pm)
+        if coords:
+            data.append({"address": name, "display_name": name, "lat": float(coords.group(2)), "lng": float(coords.group(1)), "ready": True})
+        else:
+            msc = re.search(r'<Data name=".*?MIEJSC.*?">\s*<value>(.*?)</value>', pm, re.IGNORECASE)
+            ulica = re.search(r'<Data name=".*?ULICA.*?">\s*<value>(.*?)</value>', pm, re.IGNORECASE)
+            nr = re.search(r'<Data name=".*?NR_DOM.*?">\s*<value>(.*?)</value>', pm, re.IGNORECASE)
+            if msc:
+                addr = f"{ulica.group(1) if ulica else ''} {nr.group(1) if nr else ''}, {msc.group(1)}, Polska"
+                data.append({"address": addr, "display_name": f"{msc.group(1)} {ulica.group(1) if ulica else ''}", "lat": None, "lng": None, "ready": False})
     return pd.DataFrame(data)
 
 def geocode_single(address, geolocator):
     try:
-        time.sleep(1.2)
+        time.sleep(1.1)
         location = geolocator.geocode(address, timeout=10)
-        if location:
-            return location.latitude, location.longitude
-    except:
-        pass
-    return None, None
+        return (location.latitude, location.longitude) if location else (None, None)
+    except: return None, None
 
-def geocode_points(df):
-    geolocator = Nominatim(user_agent="route_optimizer_v10")
-    lats, lngs = [], []
-    my_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for i, row in df.iterrows():
-        status_text.text(f"📍 Lokalizowanie ({i+1}/{len(df)}): {row['display_name']}")
-        lat, lng = geocode_single(row['address'], geolocator)
-        lats.append(lat)
-        lngs.append(lng)
-        my_bar.progress((i + 1) / len(df))
-    
-    df['lat'] = lats
-    df['lng'] = lngs
-    status_text.empty()
-    return df.dropna(subset=['lat', 'lng']).reset_index(drop=True)
+# --- SIDEBAR: ZARZĄDZANIE PIGUŁKAMI ---
+st.sidebar.header("📍 Twoje Pigułki (Bazy)")
 
-def calculate_distance(p1, p2):
-    return math.sqrt((p1['lat'] - p2['lat'])**2 + (p1['lng'] - p2['lng'])**2)
+# Dodawanie nowej pigułki
+with st.sidebar.expander("➕ Dodaj nową pigułkę"):
+    new_name = st.text_input("Nazwa (np. Biuro):")
+    new_addr = st.text_input("Adres:")
+    if st.button("Zapisz pigułkę"):
+        if new_name and new_addr:
+            st.session_state['saved_locations'][new_name] = new_addr
+            st.rerun()
 
-def optimize_route(df, start_node, end_node):
-    # Punkty do odwiedzenia (wszystkie poza startem i metą z okienek)
-    to_visit = df[(df['display_name'] != "🏠 MÓJ START") & (df['display_name'] != "🏁 MOJA META")].to_dict('records')
-    
-    route = [start_node]
-    current = start_node
-    
-    while to_visit:
-        next_node = min(to_visit, key=lambda x: calculate_distance(current, x))
-        route.append(next_node)
-        to_visit.remove(next_node)
-        current = next_node
-        
-    route.append(end_node)
-    return pd.DataFrame(route)
-
-# --- PANEL BOCZNY ---
-st.sidebar.header("🏠 Punkty Stałe")
-custom_start = st.sidebar.text_input("Adres STARTU:", placeholder="Ulica, Numer, Miasto")
-custom_meta = st.sidebar.text_input("Adres METY:", placeholder="Ulica, Numer, Miasto")
+# Wyświetlanie pigułek
+if st.session_state['saved_locations']:
+    st.sidebar.write("Kliknij, aby ustawić:")
+    for name, addr in st.session_state['saved_locations'].items():
+        col1, col2 = st.sidebar.columns(2)
+        if col1.button(f"S: {name}", use_container_width=True):
+            st.session_state['start_addr'] = addr
+        if col2.button(f"M: {name}", use_container_width=True):
+            st.session_state['meta_addr'] = addr
 
 st.sidebar.divider()
-st.sidebar.header("📁 Pliki Rejonów")
-uploaded_file = st.sidebar.file_uploader("Wgraj plik KML/TXT", type=['kml', 'txt'])
 
-# Inicjalizacja bazy punktów w sesji
-if 'data' not in st.session_state:
-    st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng'])
+# --- SIDEBAR: PUNKTY TRASY ---
+st.sidebar.header("🚀 Konfiguracja Trasy")
+st.session_state['start_addr'] = st.sidebar.text_input("Punkt START:", value=st.session_state['start_addr'])
+st.session_state['meta_addr'] = st.sidebar.text_input("Punkt META:", value=st.session_state['meta_addr'])
 
-if uploaded_file:
-    if st.sidebar.button("➕ Dodaj punkty z tego plika", use_container_width=True):
-        content = uploaded_file.read().decode('utf-8')
-        new_raw = parse_any_kml(content)
-        new_geocoded = geocode_points(new_raw)
-        
-        # Łączenie z istniejącymi punktami
-        st.session_state['data'] = pd.concat([st.session_state['data'], new_geocoded], ignore_index=True).drop_duplicates(subset=['address'])
-        st.sidebar.success(f"Dodano punkty! Łącznie masz ich: {len(st.session_state['data'])}")
+uploaded_file = st.sidebar.file_uploader("Wgraj KML/TXT", type=['kml', 'txt'])
+if uploaded_file and st.sidebar.button("➕ Dodaj punkty z pliku"):
+    new_df = parse_kml_smart(uploaded_file.read().decode('utf-8'))
+    # Geokodowanie tylko brakujących
+    geolocator = Nominatim(user_agent="route_optimizer_v12")
+    for idx, row in new_df[new_df['lat'].isna()].iterrows():
+        lat, lng = geocode_single(row['address'], geolocator)
+        new_df.at[idx, 'lat'], new_df.at[idx, 'lng'] = lat, lng
+    
+    st.session_state['data'] = pd.concat([st.session_state['data'], new_df.dropna(subset=['lat'])], ignore_index=True).drop_duplicates(subset=['address'])
+    st.sidebar.success(f"Baza: {len(st.session_state['data'])} pkt.")
 
-if st.sidebar.button("🗑️ Wyczyść wszystko", use_container_width=True):
-    st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng'])
+if st.sidebar.button("🗑️ Wyczyść listę punktów"):
+    st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng', 'ready'])
     if 'optimized' in st.session_state: del st.session_state['optimized']
     st.rerun()
 
 # --- PANEL GŁÓWNY ---
 if not st.session_state['data'].empty:
     df = st.session_state['data']
-    
-    st.write(f"### ⚙️ Optymalizacja (Liczba punktów: {len(df)})")
-    st.info(f"Trasa: {custom_start if custom_start else 'brak'} ➡️ {len(df)} punktów ➡️ {custom_meta if custom_meta else 'brak'}")
-
-    if st.button("🚀 Oblicz optymalną trasę", type="primary", use_container_width=True):
-        if not custom_start or not custom_meta:
-            st.error("Wpisz adres Startu i Mety w panelu bocznym!")
+    if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ", type="primary", use_container_width=True):
+        if not st.session_state['start_addr'] or not st.session_state['meta_addr']:
+            st.error("Ustaw Start i Metę (użyj pigułek lub wpisz adres).")
         else:
-            geolocator = Nominatim(user_agent="route_optimizer_v10")
-            
-            # Geokodowanie bazy start/meta tylko przy obliczaniu
-            s_lat, s_lng = geocode_single(custom_start, geolocator)
-            m_lat, m_lng = geocode_single(custom_meta, geolocator)
+            geolocator = Nominatim(user_agent="route_optimizer_v12")
+            s_lat, s_lng = geocode_single(st.session_state['start_addr'], geolocator)
+            m_lat, m_lng = geocode_single(st.session_state['meta_addr'], geolocator)
             
             if s_lat and m_lat:
-                start_node = {"address": custom_start, "display_name": "🏠 MÓJ START", "lat": s_lat, "lng": s_lng}
-                end_node = {"address": custom_meta, "display_name": "🏁 MOJA META", "lat": m_lat, "lng": m_lng}
+                start_node = {"display_name": "🏠 START", "lat": s_lat, "lng": s_lng}
+                end_node = {"display_name": "🏁 META", "lat": m_lat, "lng": m_lng}
                 
-                st.session_state['optimized'] = optimize_route(df, start_node, end_node)
+                # Algorytm najbliższego sąsiada
+                unvisited = df.to_dict('records')
+                route = [start_node]
+                current = start_node
+                while unvisited:
+                    next_node = min(unvisited, key=lambda x: math.sqrt((current['lat']-x['lat'])**2 + (current['lng']-x['lng'])**2))
+                    route.append(next_node)
+                    unvisited.remove(next_node)
+                route.append(end_node)
+                st.session_state['optimized'] = pd.DataFrame(route)
             else:
-                st.error("Nie znaleziono adresu Startu lub Mety. Sprawdź pisownię.")
+                st.error("Nie udało się zlokalizować Twojego Startu/Mety.")
 
-    # WYNIKI
     res_df = st.session_state.get('optimized', df)
-    
-    col_l, col_r = st.columns([1, 2])
-    with col_l:
+    cl, cr = st.columns([1, 2])
+    with cl:
         st.subheader("📋 Plan")
         st.dataframe(res_df[['display_name']], use_container_width=True, height=600)
-
-    with col_r:
+    with cr:
         st.subheader("🗺️ Mapa")
-        try:
-            m = folium.Map(location=[res_df['lat'].mean(), res_df['lng'].mean()], zoom_start=11)
-            pts = []
-            for i, row in res_df.iterrows():
-                color = 'blue'
-                if i == 0: color = 'green'
-                elif 'optimized' in st.session_state and i == len(res_df)-1: color = 'red'
-                
-                folium.Marker(
-                    [row['lat'], row['lng']],
-                    tooltip=f"{i+1}. {row['display_name']}",
-                    icon=folium.Icon(color=color, icon='info-sign')
-                ).addTo(m)
-                pts.append([row['lat'], row['lng']])
-            
-            if 'optimized' in st.session_state and len(pts) > 1:
-                folium.PolyLine(pts, color="royalblue", weight=4).addTo(m)
-            
-            st_folium(m, width="100%", height=600, key="v10_map")
-        except:
-            st.write("Wgraj dane, aby zobaczyć mapę.")
+        m = folium.Map(location=[res_df['lat'].mean(), res_df['lng'].mean()], zoom_start=11)
+        pts = []
+        for i, row in res_df.iterrows():
+            color = 'green' if i == 0 else ('red' if i == len(res_df)-1 and 'optimized' in st.session_state else 'blue')
+            folium.Marker([row['lat'], row['lng']], tooltip=f"{i+1}. {row['display_name']}", icon=folium.Icon(color=color)).addTo(m)
+            pts.append([row['lat'], row['lng']])
+        if 'optimized' in st.session_state:
+            folium.PolyLine(pts, color="royalblue", weight=4).addTo(m)
+        st_folium(m, width="100%", height=600, key="v12")
 else:
-    st.info("👈 Wpisz adresy start/meta i dodaj pierwszy plik KML/TXT.")
+    st.info("👈 Dodaj punkty z pliku KML i ustaw Start/Metę pigułką.")
