@@ -10,12 +10,25 @@ import math
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Optymalizator Tras", layout="wide")
 
+# Styl CSS do wyśrodkowania ikonki kosza i poprawy wyglądu przycisków
+st.markdown("""
+    <style>
+    div[data-testid="column"] {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .stButton button {
+        width: 100%;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("Optymalizator Tras")
 
 # --- INICJALIZACJA PAMIĘCI ---
 if 'saved_locations' not in st.session_state:
     st.session_state['saved_locations'] = {}
-
 if 'data' not in st.session_state:
     st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng', 'ready'])
 if 'start_addr' not in st.session_state:
@@ -24,7 +37,6 @@ if 'meta_addr' not in st.session_state:
     st.session_state['meta_addr'] = ""
 
 # --- FUNKCJE POMOCNICZE ---
-
 def parse_kml_smart(file_content):
     placemarks = re.findall(r'<Placemark>(.*?)</Placemark>', file_content, re.DOTALL)
     data = []
@@ -69,18 +81,19 @@ with st.sidebar.expander("➕ Dodaj nowy punkt"):
             st.rerun()
 
 if st.session_state['saved_locations']:
-    st.sidebar.write("Ustaw jako:")
+    st.sidebar.write("Ustaw jako Start (S) lub Metę (M):")
     for name, addr in st.session_state['saved_locations'].items():
-        c1, c2, c3 = st.sidebar.columns([1, 1, 0.4])
-        if c1.button(f"S: {name}", use_container_width=True, help=f"Start: {addr}"):
+        # Kolumny o różnych szerokościach dla lepszego wyrównania
+        c1, c2, c3 = st.sidebar.columns([1, 1, 0.6])
+        if c1.button(f"S: {name}", key=f"s_{name}", help=f"Ustaw START: {addr}"):
             st.session_state['start_addr'] = addr
-        if c2.button(f"M: {name}", use_container_width=True, help=f"Meta: {addr}"):
+        if c2.button(f"M: {name}", key=f"m_{name}", help=f"Ustaw METĘ: {addr}"):
             st.session_state['meta_addr'] = addr
-        if c3.button("🗑️", key=f"del_{name}"):
+        if c3.button("🗑️", key=f"del_{name}", help="Usuń ten punkt"):
             del st.session_state['saved_locations'][name]
             st.rerun()
 else:
-    st.sidebar.info("Lista punktów jest pusta.")
+    st.sidebar.info("Lista punktów stałych jest pusta.")
 
 st.sidebar.divider()
 
@@ -93,7 +106,7 @@ uploaded_file = st.sidebar.file_uploader("Wgraj plik KML/TXT", type=['kml', 'txt
 
 if uploaded_file and st.sidebar.button("➕ Dodaj punkty z pliku", use_container_width=True):
     new_df = parse_kml_smart(uploaded_file.read().decode('utf-8'))
-    geolocator = Nominatim(user_agent="route_optimizer_v14")
+    geolocator = Nominatim(user_agent="route_optimizer_v15")
     to_geo = new_df[new_df['lat'].isna()]
     
     if not to_geo.empty:
@@ -116,9 +129,9 @@ if not st.session_state['data'].empty:
     df = st.session_state['data']
     if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ", type="primary", use_container_width=True):
         if not st.session_state['start_addr'] or not st.session_state['meta_addr']:
-            st.error("Ustaw Start i Metę (użyj punktów stałych lub wpisz adresy).")
+            st.error("Wpisz adresy Startu i Mety (użyj punktów stałych).")
         else:
-            geolocator = Nominatim(user_agent="route_optimizer_v14")
+            geolocator = Nominatim(user_agent="route_optimizer_v15")
             s_lat, s_lng = geocode_single(st.session_state['start_addr'], geolocator)
             m_lat, m_lng = geocode_single(st.session_state['meta_addr'], geolocator)
             
@@ -134,8 +147,9 @@ if not st.session_state['data'].empty:
                     unvisited.remove(next_node)
                 route.append(end_node)
                 st.session_state['optimized'] = pd.DataFrame(route)
+                st.rerun()
             else:
-                st.error("Nie znaleziono lokalizacji Startu/Mety.")
+                st.error("Błąd lokalizacji Startu/Mety.")
 
     res_df = st.session_state.get('optimized', df)
     cl, cr = st.columns([1, 2])
@@ -152,6 +166,6 @@ if not st.session_state['data'].empty:
             pts.append([row['lat'], row['lng']])
         if 'optimized' in st.session_state:
             folium.PolyLine(pts, color="royalblue", weight=4).addTo(m)
-        st_folium(m, width="100%", height=600, key="v14")
+        st_folium(m, width="100%", height=600, key="v15")
 else:
-    st.info("👈 Wgraj plik i ustaw punkty startu/mety.")
+    st.info("👈 Wgraj plik i ustaw punkty trasy w panelu bocznym.")
