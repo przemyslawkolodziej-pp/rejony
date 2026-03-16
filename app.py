@@ -8,9 +8,10 @@ import time
 import math
 import json
 
-# --- 1. BEZPIECZNY SYSTEM LOGOWANIA (Pamięć tylko w sesji) ---
+# --- 1. BEZPIECZNY SYSTEM LOGOWANIA (Tylko w pamięci sesji) ---
 def logout():
-    st.session_state['authenticated'] = False
+    for key in st.session_state.keys():
+        del st.session_state[key]
     st.rerun()
 
 if 'authenticated' not in st.session_state:
@@ -37,20 +38,28 @@ if not st.session_state['authenticated']:
 
 st.set_page_config(page_title="Optymalizator Tras", layout="wide")
 
-# STYLIZACJA CSS
+# STYLIZACJA CSS (Mniejsze czcionki, zagęszczony interfejs)
 st.markdown("""
     <style>
     html, body, [class*="css"] { font-size: 14px; }
     .stTextInput label, .stSelectbox label, .stFileUploader label { font-size: 12px !important; margin-bottom: 2px; }
     input { font-size: 13px !important; padding: 5px !important; }
     
-    /* Przyciski S/M - dostosowanie pod dłuższy tekst */
+    /* Styl przycisków w sidebarze */
     .stButton button { 
         font-size: 11px !important; 
         padding: 4px 2px !important; 
         line-height: 1.2 !important;
-        min-height: 45px !important; 
+        min-height: 40px !important; 
         width: 100%; 
+    }
+    
+    /* Wyśrodkowanie tekstu statusu (START/META) */
+    .status-text {
+        font-size: 11px;
+        font-weight: bold;
+        text-align: center;
+        padding-top: 10px;
     }
     
     div[data-testid="column"] { display: flex; align-items: center; justify-content: center; gap: 5px; }
@@ -97,6 +106,7 @@ def geocode_single(address, geolocator):
 
 # --- PANEL BOCZNY (SIDEBAR) ---
 
+# 1. KONFIGURACJA TRASY
 with st.sidebar.expander("🚀 Konfiguracja Trasy", expanded=True):
     st.markdown(f"""
     <div class="selection-info">
@@ -115,10 +125,11 @@ with st.sidebar.expander("🚀 Konfiguracja Trasy", expanded=True):
     if st.button("🗑️ Wyczyść aktualne punkty"):
         st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng'])
         st.session_state['start_name'], st.session_state['meta_name'] = "Nie wybrano", "Nie wybrano"
-        st.session_state['start_addr'], st.session_state['meta_addr'] = "", ""
+        st.session_state['start_addr'], st.session_state['meta_addr'] = "" , ""
         if 'optimized' in st.session_state: del st.session_state['optimized']
         st.rerun()
 
+# 2. TWOJE BAZY (Z wizualnym potwierdzeniem)
 with st.sidebar.expander("📍 Twoje Bazy", expanded=False):
     with st.form("add_base_form", clear_on_submit=True):
         n_n = st.text_input("Nazwa (np. WER):")
@@ -130,22 +141,39 @@ with st.sidebar.expander("📍 Twoje Bazy", expanded=False):
     
     st.divider()
     for n, a in st.session_state['saved_locations'].items():
+        is_start = (st.session_state['start_name'] == n)
+        is_meta = (st.session_state['meta_name'] == n)
+        
         st.write(f"**{n}**")
         c1, c2, c3 = st.columns([1, 1, 0.4])
-        if c1.button(f"Ustaw jako punkt Startu", key=f"s_{n}"):
-            st.session_state['start_addr'] = a
-            st.session_state['start_name'] = n
-            st.toast(f"Ustawiono START: {n}")
-            st.rerun()
-        if c2.button(f"Ustaw jako punkt Mety", key=f"m_{n}"):
-            st.session_state['meta_addr'] = a
-            st.session_state['meta_name'] = n
-            st.toast(f"Ustawiono METĘ: {n}")
-            st.rerun()
-        if c3.button("🗑️", key=f"d_{n}"):
-            del st.session_state['saved_locations'][n]
-            st.rerun()
+        
+        with c1:
+            if is_start:
+                st.markdown('<p class="status-text">🟢 START</p>', unsafe_allow_html=True)
+            else:
+                if st.button(f"Ustaw jako punkt Startu", key=f"s_{n}"):
+                    st.session_state['start_addr'] = a
+                    st.session_state['start_name'] = n
+                    st.rerun()
+        
+        with c2:
+            if is_meta:
+                st.markdown('<p class="status-text">🔴 META</p>', unsafe_allow_html=True)
+            else:
+                if st.button(f"Ustaw jako punkt Mety", key=f"m_{n}"):
+                    st.session_state['meta_addr'] = a
+                    st.session_state['meta_name'] = n
+                    st.rerun()
+                    
+        with c3:
+            if st.button("🗑️", key=f"d_{n}"):
+                if is_start: st.session_state['start_name'] = "Nie wybrano"
+                if is_meta: st.session_state['meta_name'] = "Nie wybrano"
+                del st.session_state['saved_locations'][n]
+                st.rerun()
+        st.divider()
 
+# 3. PROJEKTY
 with st.sidebar.expander("📁 Zapisane Projekty", expanded=False):
     p_name = st.text_input("Nazwa projektu:")
     if st.button("Zapisz bieżący stan"):
@@ -176,6 +204,7 @@ with st.sidebar.expander("📁 Zapisane Projekty", expanded=False):
             del st.session_state['projects'][sel_p]
             st.rerun()
 
+# 4. KOPIA ZAPASOWA
 with st.sidebar.expander("💾 Kopia zapasowa", expanded=False):
     full_export = {
         "saved_locations": st.session_state['saved_locations'],
@@ -200,6 +229,7 @@ with st.sidebar.expander("💾 Kopia zapasowa", expanded=False):
             st.success("Wczytano pomyślnie!")
         except: st.error("Błąd pliku.")
 
+# WYLOGUJ
 st.sidebar.markdown('<div class="logout-btn">', unsafe_allow_html=True)
 if st.sidebar.button("🔓 WYLOGUJ MNIE"):
     logout()
@@ -207,12 +237,14 @@ st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
 # --- PANEL GŁÓWNY ---
 df = st.session_state['data']
+st.title("🗺️ Optymalizator Tras")
+
 if not df.empty:
     if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ", type="primary", use_container_width=True):
         if st.session_state['start_addr'] == "" or st.session_state['meta_addr'] == "":
-            st.error("Wybierz Start i Metę z sekcji 'Twoje Bazy'!")
+            st.error("⚠️ Najpierw wybierz Start i Metę z sekcji 'Twoje Bazy'!")
         else:
-            geolocator = Nominatim(user_agent="opt_v27")
+            geolocator = Nominatim(user_agent="opt_v28")
             s_lat, s_lng = geocode_single(st.session_state['start_addr'], geolocator)
             m_lat, m_lng = geocode_single(st.session_state['meta_addr'], geolocator)
             if s_lat and m_lat:
@@ -227,7 +259,7 @@ if not df.empty:
                 st.session_state['optimized'] = pd.DataFrame(route)
                 st.rerun()
             else:
-                st.error("Nie udało się zlokalizować bazy. Sprawdź poprawność adresu.")
+                st.error("Nie udało się zlokalizować bazy. Sprawdź czy adres jest poprawny.")
 
     res_df = st.session_state.get('optimized', df)
     cl, cr = st.columns([1, 2.5])
@@ -243,6 +275,6 @@ if not df.empty:
                 folium.Marker([r['lat'], r['lng']], tooltip=r['display_name'], icon=folium.Icon(color=color)).addTo(m)
                 pts.append([r['lat'], r['lng']])
             if 'optimized' in st.session_state: folium.PolyLine(pts, color="royalblue", weight=4).addTo(m)
-            st_folium(m, width="100%", height=600, key="map_v27")
+            st_folium(m, width="100%", height=600, key="map_v28")
 else:
-    st.info("👈 Wgraj plik KML i wybierz bazy (Start/Meta), aby rozpocząć.")
+    st.info("👈 Wgraj plik KML i wybierz bazy w panelu bocznym, aby przygotować trasę.")
