@@ -6,12 +6,205 @@ from geopy.geocoders import Nominatim
 import re
 import time
 import math
-
 import streamlit_authenticator as stauth
-# Generowanie hasha w nowej wersji biblioteki
-hash_hasla = stauth.Hasher.hash('Rejony.PP.777')
-st.write("### TWÓJ HASH:")
-st.code(hash_hasla)
+import json
+
+# --- 1. KONFIGURACJA LOGOWANIA ---
+# Hasło: Rejony.PP.777 (użyj wygenerowanego hasha poniżej)
+credentials = {
+    "usernames": {
+        "admin": {
+            "name": "WFiP Wschód",
+            "password": "$2b$12$nOV/UK1rLwnD5ecqQjney.TuybBHTKtRL3xS.oFrXxrTpmjKngTxW", 
+             }
+    }
+}
+
+authenticator = stauth.Authenticate(
+    credentials,
+    "optymalizator_tras_cookie",
+    "abcdef123456", 
+    cookie_expiry_days=30
+)
+
+name, authentication_status, username = authenticator.login('main')
+
+# --- 2. LOGIKA APLIKACJI (TYLKO DLA ZALOGOWANYCH) ---
+if authentication_status:
+    authenticator.logout('Wyloguj', 'sidebar')
+    
+    st.title("🗺️ Optymalizator Tras")
+
+    # Styl CSS do wyśrodkowania przycisków
+    st.markdown("""
+        <style>
+        div[data-testid="column"] { display: flex; align-items: center; justify-content: center; }
+        .stButton button { width: 100%; }
+        </style>
+        """, unsafe_allow_html=True)
+
+    # Inicjalizacja pamięci
+    if 'saved_locations' not in st.session_state: st.session_state['saved_locations'] = {}
+    if 'projects' not in st.session_state: st.session_state['projects'] = {}
+    if 'data' not in st.session_state: st.session_state['data'] = pd.DataFrame(columns=['address', 'display_name', 'lat', 'lng'])
+    if 'start_addr' not in st.session_state: st.session_state['start_addr'] = ""
+    if 'meta_addr' not in st.session_state: st.session_state['meta_addr'] = ""
+
+    # --- FUNKCJE POMOCNICZE ---
+    def parse_kml_custom(file_content):
+        placemarks = re.findall(r'<Placemark>(.*?)</Placemark>', file_content, re.DOTALL)
+        data = []
+        for pm in placemarks:
+            name_match = re.search(r'<name>(.*?)</name>', pm)
+            name = name_match.group(1) if name_match else "Punkt"
+            lat_m = re.search(r'<Data name="Latitude">\s*<value>(.*?)</value>', pm, re.IGNORECASE)
+            lng_m = re.search(r'<Data name="Longitude">\s*<value>(.*?)</value>', pm, re.IGNORECASE)
+            lat, lng = None, None
+            if lat_m and lng_m:
+                try:
+                    lat = float(lat_m.group(1).replace(',', '.'))
+                    lng = float(lng_m.group(1).replace(',', '.'))
+                except: pass
+            if lat is None:
+                coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
+                if coords:
+                    lng, lat = float(coords.group(1)), float(coords.group(2))
+            if lat is not None:
+                data.append({"address": name, "display_name": name, "lat": lat, "lng": lng})
+        return pd.DataFrame(data)
+
+    def geocode_single(address, geolocator):
+        try:
+            time.sleep(1.1)
+            loc = geolocator.geocode(address, timeout=10)
+            return (loc.latitude, loc.longitude) if loc else (None, None)
+        except: return (None, None)
+
+    # --- SIDEBAR: BACKUP ---
+    st.sidebar.header("💾 Kopia zapasowa")
+    full_export = {
+        "saved_locations": st.session_state['saved_locations'],
+        "projects": {k: {"start": v["start"], "meta": v["meta"], "data": v["data"].to_dict()} 
+                     for k, v in st.session_state['projects'].items()}
+    }
+    st.sidebar.download_button("📥 Pobierz bazę na dysk", data=json.dumps(full_export), file_name="backup_tras.json")
+    
+    up_backup = st.sidebar.file_uploader("📤 Wgraj bazę", type="json")
+    if up_backup:
+        b = json.load(up_backup)
+        st.session_state['saved_locations'] = b["saved_locations"]
+        for k, v in b["projects"].items():
+            st.session_state['projects'][k] = {"start": v["start"], "meta": v["meta"], "data": pd.DataFrame(v["data"])}
+        st.sidebar.success("Wczytano!")
+
+    # --- SIDEBAR: PROJEKTY ---
+    st.sidebar.divider()
+    st.sidebar.header("📁 Projekty")
+    p_name = st.sidebar.text_input("Nazwa nowego projektu:")
+    if st.sidebar.button("Zapisz bieżący stan jako projekt"):
+        if p_name:
+            st.session_state['projects'][p_name] = {
+                'data': st.session_state['data'].copy(),
+                'start': st.session_state['start_addr'],
+                'meta': st.session_state['meta_addr']
+            }
+            st.rerun()
+
+    if st.session_state['projects']:
+        sel_p = st.sidebar.selectbox("Twoje rejony:", list(st.session_state['projects'].keys()))
+        c_l, c_d = st.sidebar.columns(2)
+        if c_l.button("Wczytaj"):
+            pr = st.session_state['projects'][sel_p]
+            st.session_state['data'], st.session_state['start_addr'], st.session_state['meta_addr'] = pr['data'].copy(), pr['start'], pr['meta']
+            if 'optimized' in st.session_state: del st.session_state['optimized']
+            st.rerun()
+        if c_d.button("Usuń"):
+            del st.session_state['projects'][sel_p]
+            st.rerun()
+
+    # --- SIDEBAR: PUNKTY STAŁE ---
+    st.sidebar.divider()
+    st.sidebar.header("📍 Punkty Stałe")
+    with st.sidebar.expander("Dodaj punkt"):
+        n_n = st.text_input("Nazwa:")
+        n_a = st.text_input("Adres:")
+        if st.button("Zapisz"):
+            st.session_state['saved_locations'][n_n] = n_a
+            st.rerun()
+    
+    for n, a in st.session_state['saved_locations'].items():
+        c1, c2, c3 = st.sidebar.columns([1, 1, 0.6])
+        if c1.button(f"S: {n}", key=f"s_{n}"): st.session_state['start_addr'] = a
+        if c2.button(f"M: {n}", key=f"m_{n}"): st.session_state['meta_addr'] = a
+        if c3.button("🗑️", key=f"d_{n}"):
+            del st.session_state['saved_locations'][n]
+            st.rerun()
+
+    # --- SIDEBAR: REJON ---
+    st.sidebar.divider()
+    st.sidebar.header("🚀 Trasa")
+    st.session_state['start_addr'] = st.sidebar.text_input("Start:", value=st.session_state['start_addr'])
+    st.session_state['meta_addr'] = st.sidebar.text_input("Meta:", value=st.session_state['meta_addr'])
+    
+    up_kml = st.sidebar.file_uploader("Dodaj KML", type=['kml'])
+    if up_kml and st.sidebar.button("Wczytaj punkty"):
+        new_pts = parse_kml_custom(up_kml.read().decode('utf-8'))
+        st.session_state['data'] = pd.concat([st.session_state['data'], new_pts], ignore_index=True).drop_duplicates(subset=['lat', 'lng'])
+        st.rerun()
+
+    # --- GŁÓWNY PANEL ---
+    df = st.session_state['data']
+    if not df.empty:
+        if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ", type="primary", use_container_width=True):
+            geolocator = Nominatim(user_agent="opt_tras_v20")
+            s_lat, s_lng = geocode_single(st.session_state['start_addr'], geolocator)
+            m_lat, m_lng = geocode_single(st.session_state['meta_addr'], geolocator)
+            if s_lat and m_lat:
+                start_node = {"display_name": "🏠 START", "lat": s_lat, "lng": s_lng}
+                end_node = {"display_name": "🏁 META", "lat": m_lat, "lng": m_lng}
+                unvisited = df.to_dict('records')
+                route, current = [start_node], start_node
+                while unvisited:
+                    nxt = min(unvisited, key=lambda x: math.sqrt((current['lat']-x['lat'])**2 + (current['lng']-x['lng'])**2))
+                    route.append(nxt)
+                    unvisited.remove(nxt)
+                route.append(end_node)
+                st.session_state['optimized'] = pd.DataFrame(route)
+                st.rerun()
+        
+        res_df = st.session_state.get('optimized', df)
+        cl, cr = st.columns([1, 2])
+        with cl:
+            st.subheader("📋 Plan")
+            st.dataframe(res_df[['display_name']], use_container_width=True, height=600)
+        with cr:
+            st.subheader("🗺️ Mapa")
+            try:
+                m_df = res_df.dropna(subset=['lat', 'lng'])
+                m = folium.Map(location=[m_df['lat'].mean(), m_df['lng'].mean()], zoom_start=11)
+                pts = []
+                for i, r in m_df.iterrows():
+                    color = 'green' if i == 0 else ('red' if i == len(m_df)-1 and 'optimized' in st.session_state else 'blue')
+                    folium.Marker([r['lat'], r['lng']], tooltip=r['display_name'], icon=folium.Icon(color=color)).addTo(m)
+                    pts.append([r['lat'], r['lng']])
+                if 'optimized' in st.session_state:
+                    folium.PolyLine(pts, color="royalblue", weight=4).addTo(m)
+                st_folium(m, width="100%", height=600, key="map_v20")
+            except: st.warning("Błąd mapy.")
+    else:
+        st.info("Dodaj punkty rejonu lub wczytaj projekt.")
+
+elif authentication_status == False:
+    st.error('Błąd logowania.')
+elif authentication_status == None:
+    st.warning('Zaloguj się.')import streamlit as st
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
+from geopy.geocoders import Nominatim
+import re
+import time
+import math
 
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Optymalizator Tras", layout="wide")
