@@ -8,35 +8,38 @@ import time
 import math
 import json
 
-# --- 1. SYSTEM LOGOWANIA ---
+# --- 1. BEZPIECZNY SYSTEM LOGOWANIA ---
+
 def logout():
     st.session_state['authenticated'] = False
-    st.query_params.clear()
     st.rerun()
 
-if "logged_in" in st.query_params and st.query_params["logged_in"] == "true":
-    st.session_state['authenticated'] = True
-
+# Inicjalizacja stanu autoryzacji
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
+# Ekran logowania
 if not st.session_state['authenticated']:
     st.set_page_config(page_title="Logowanie", page_icon="🔐")
     st.title("🔐 Dostęp chroniony")
+    
     with st.form("login_form"):
         pwd_input = st.text_input("Wpisz hasło dostępu:", type="password")
         submit_button = st.form_submit_button("Zaloguj")
+        
         if submit_button:
             if "password" in st.secrets:
                 if pwd_input == st.secrets["password"]:
+                    # Sukces: ustawiamy flagę tylko w pamięci serwera (session_state)
                     st.session_state['authenticated'] = True
-                    st.query_params["logged_in"] = "true"
                     st.rerun()
                 else:
                     st.error("❌ Błędne hasło")
             else:
                 st.error("Błąd: Skonfiguruj hasło w 'Secrets'.")
     st.stop()
+
+# Jeśli kod dojdzie tutaj, oznacza to, że użytkownik przeszedł przez st.form powyżej
 
 # --- 2. GŁÓWNA LOGIKA APLIKACJI ---
 
