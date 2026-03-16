@@ -7,6 +7,10 @@ import re
 import time
 import math
 
+import streamlit_authenticator as stauth
+st.write("### TWÓJ HASH DO HASŁA 'moje_tajne_haslo':")
+st.code(stauth.Hasher(['Rejony.PP.777']).generate()[0])
+
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Optymalizator Tras", layout="wide")
 
