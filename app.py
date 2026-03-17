@@ -43,7 +43,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v89", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v92", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -54,9 +54,10 @@ def check_password():
     return False
 
 # Inicjalizacja sesji
-for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'selected_regions']:
+for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
     if key not in st.session_state: 
-        st.session_state[key] = pd.DataFrame() if key == 'data' else ([] if key in ['optimized_list', 'geometries', 'selected_regions'] else ({} if key in ['saved_locations', 'projects'] else None))
+        st.session_state[key] = pd.DataFrame() if key == 'data' else (0 if key == 'reset_counter' else ([] if key in ['optimized_list', 'geometries'] else ({} if key in ['saved_locations', 'projects'] else None)))
+
 if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
 if not check_password(): st.stop()
@@ -84,7 +85,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v89_geo")
+        gl = Nominatim(user_agent="v92_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -152,11 +153,18 @@ with st.sidebar:
                 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
                 'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
             }
-            save_to_disk(); st.success("Zapisano!")
+            save_to_disk(); st.success("Zapisano!"); st.rerun()
         if st.session_state['projects']:
-            sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
-            if sel_p != "---" and st.button("📂 Otwórz"):
-                st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
+            st.markdown("---")
+            sel_p = st.selectbox("Wybierz projekt:", ["---"] + list(st.session_state['projects'].keys()))
+            if sel_p != "---":
+                col_open, col_del = st.columns([3, 1])
+                with col_open:
+                    if st.button("📂 Otwórz"):
+                        st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
+                with col_del:
+                    if st.button("🗑️", key=f"del_proj_{sel_p}"):
+                        del st.session_state['projects'][sel_p]; save_to_disk(); st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
@@ -170,22 +178,16 @@ with c_meta: st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.sess
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty or sc:
-    # FILTRY I WIDOK
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-        # Inicjalizacja domyślnych rejonów, jeśli sesja jest pusta
-        if not st.session_state['selected_regions']: st.session_state['selected_regions'] = u_files
-        
-        v_files = st.multiselect("Rejony:", u_files, default=st.session_state['selected_regions'], key="regions_multiselect")
-        st.session_state['selected_regions'] = v_files
+        v_files = st.multiselect("Rejony:", u_files, key=f"ms_{st.session_state['reset_counter']}")
         filtered_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_files)]
 
     with col_view:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    # AKCJE
     col_calc, col_clear = st.columns([3, 1])
     with col_calc:
         if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
@@ -195,6 +197,7 @@ if not st.session_state['data'].empty or sc:
                     st.session_state.update({'optimized_list': [], 'geometries': []})
                     groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
                     for group in groups:
+                        if group.empty: continue
                         curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
                         route, unv = [curr], group.to_dict('records')
                         while unv:
@@ -207,14 +210,12 @@ if not st.session_state['data'].empty or sc:
                     st.rerun()
 
     with col_clear:
-        # ROZSZERZONY PRZYCISK WYCZYŚĆ
-        if st.button("🗑️ WYCZYŚĆ", key="btn_clear_v89", use_container_width=True):
+        if st.button("🗑️ WYCZYŚĆ", key="main_reset_btn", use_container_width=True):
             st.session_state['optimized_list'] = []
             st.session_state['geometries'] = []
-            st.session_state['selected_regions'] = [] # Czyści pigułki (rejony)
+            st.session_state['reset_counter'] += 1 
             st.rerun()
 
-    # RENDEROWANIE MAPY
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
     m = folium.Map()
     all_coords = [[sc['lat'], sc['lng']]] if sc else []
@@ -229,9 +230,21 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v89")
+    # --- PRZYWRÓCONA LOGIKA USUWANIA PINEZEK ---
+    map_data = st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
 
-    # WYNIKI
+    if show_pins and map_data.get("last_object_clicked"):
+        clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
+        match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
+        if not match.empty:
+            t_idx, t_name = match.index[0], match.iloc[0]['display_name']
+            st.warning(f"Zaznaczono punkt: {t_name}")
+            if st.button(f"🗑️ USUŃ TEN PUNKT"):
+                st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
+                # Czyścimy geometrię, by wymusić przeliczenie nowej trasy
+                st.session_state.update({'optimized_list': [], 'geometries': []})
+                st.rerun()
+
     if visible_geoms:
         st.markdown("### 📊 Wyniki i Plan")
         cols = st.columns(min(len(visible_geoms), 4))
@@ -243,9 +256,10 @@ if not st.session_state['data'].empty or sc:
         st.markdown(f'<div class="stats-card route-sum">🌍 ŁĄCZNIE: {total_d/1000:.2f} km | {int(total_t//3600)}h {int((total_t%3600)//60)}min</div>', unsafe_allow_html=True)
 
         for i, opt_df in enumerate(st.session_state['optimized_list']):
-            source = opt_df['source_file'].iloc[1] if len(opt_df) > 1 else "Baza"
-            if mode == "Jedna trasa" or source in v_files:
-                with st.expander(f"📋 Tabela: {source if mode != 'Jedna trasa' else 'Trasa Zbiorcza'}"):
-                    st.table(opt_df[['display_name', 'source_file']].reset_index(drop=True))
+            if i < len(st.session_state['geometries']):
+                source = st.session_state['geometries'][i]['name']
+                if mode == "Jedna trasa" or st.session_state['geometries'][i]['source_file'] in v_files:
+                    with st.expander(f"📋 Tabela: {source}"):
+                        st.table(opt_df[['display_name', 'source_file']].reset_index(drop=True))
 else:
     st.info("👈 Wgraj KML i wybierz bazy.")
