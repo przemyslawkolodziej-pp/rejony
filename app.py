@@ -43,7 +43,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v88", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v89", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -54,9 +54,9 @@ def check_password():
     return False
 
 # Inicjalizacja sesji
-for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries']:
+for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'selected_regions']:
     if key not in st.session_state: 
-        st.session_state[key] = pd.DataFrame() if key == 'data' else ([] if key in ['optimized_list', 'geometries'] else ({} if key in ['saved_locations', 'projects'] else None))
+        st.session_state[key] = pd.DataFrame() if key == 'data' else ([] if key in ['optimized_list', 'geometries', 'selected_regions'] else ({} if key in ['saved_locations', 'projects'] else None))
 if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
 if not check_password(): st.stop()
@@ -79,12 +79,12 @@ def get_folium_color(idx):
 
 file_color_map = {}
 if not st.session_state['data'].empty:
-    unique_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-    for i, f in enumerate(unique_files): file_color_map[f] = get_folium_color(i)
+    u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
+    for i, f in enumerate(u_files): file_color_map[f] = get_folium_color(i)
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v88_geo")
+        gl = Nominatim(user_agent="v89_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -170,15 +170,22 @@ with c_meta: st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.sess
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty or sc:
+    # FILTRY I WIDOK
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-        v_files = st.multiselect("Rejony:", u_files, default=u_files)
+        # Inicjalizacja domyślnych rejonów, jeśli sesja jest pusta
+        if not st.session_state['selected_regions']: st.session_state['selected_regions'] = u_files
+        
+        v_files = st.multiselect("Rejony:", u_files, default=st.session_state['selected_regions'], key="regions_multiselect")
+        st.session_state['selected_regions'] = v_files
         filtered_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_files)]
+
     with col_view:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
+    # AKCJE
     col_calc, col_clear = st.columns([3, 1])
     with col_calc:
         if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
@@ -198,15 +205,17 @@ if not st.session_state['data'].empty or sc:
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
                         st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), "dist": d, "time": t, "pts_count": len(group), "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość", "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"})
                     st.rerun()
+
     with col_clear:
-        # NAPRAWIONY PRZYCISK CZYŚĆ
-        if st.button("🗑️ WYCZYŚĆ", key="btn_clear_v88", use_container_width=True):
+        # ROZSZERZONY PRZYCISK WYCZYŚĆ
+        if st.button("🗑️ WYCZYŚĆ", key="btn_clear_v89", use_container_width=True):
             st.session_state['optimized_list'] = []
             st.session_state['geometries'] = []
+            st.session_state['selected_regions'] = [] # Czyści pigułki (rejony)
             st.rerun()
 
+    # RENDEROWANIE MAPY
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
-
     m = folium.Map()
     all_coords = [[sc['lat'], sc['lng']]] if sc else []
     if mc: all_coords.append([mc['lat'], mc['lng']])
@@ -220,8 +229,9 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v88")
+    st_folium(m, width="100%", height=550, key="map_v89")
 
+    # WYNIKI
     if visible_geoms:
         st.markdown("### 📊 Wyniki i Plan")
         cols = st.columns(min(len(visible_geoms), 4))
