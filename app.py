@@ -8,7 +8,6 @@ import re, math, json, requests, hashlib, os
 # --- 1. ZAPIS I LOGOWANIE ---
 STORAGE_FILE = "data_storage.json"
 def save_to_disk():
-    # Zapisujemy wszystko co ważne: lokacje, projekty i aktualny stan
     data = {
         "saved_locations": st.session_state['saved_locations'], 
         "projects": {k: {**v, "data": v["data"].to_dict()} for k, v in st.session_state['projects'].items()}
@@ -30,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v61", page_icon="🗺️", layout="wide")
+    st.set_page_config(page_title="Optymalizator v62", page_icon="🗺️", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -40,7 +39,7 @@ def check_password():
             else: st.error("❌ Błędne hasło")
     return False
 
-# Inicjalizacja kluczy sesji
+# Inicjalizacja sesji
 for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'total_dist', 'total_time', 'geometries']:
     if key not in st.session_state: 
         st.session_state[key] = pd.DataFrame() if key == 'data' else ([] if key in ['optimized_list', 'geometries'] else ({} if key in ['saved_locations', 'projects'] else None))
@@ -48,10 +47,48 @@ if 'start_name' not in st.session_state: st.session_state.update({'start_name': 
 
 if not check_password(): st.stop()
 
-# --- 2. LOGIKA POMOCNICZA ---
+# --- 2. STYLE CSS (TRYB JASNY/CIEMNY) ---
+# Używamy zmiennych Streamlit (np. --text-color), aby CSS sam się adaptował
+st.markdown("""
+<style>
+    /* Stylowanie przycisków akcji */
+    div.stButton > button { 
+        height: 50px; 
+        width: 100%; 
+        font-size: 20px !important; 
+        border-radius: 10px;
+        transition: all 0.3s;
+    }
+    
+    /* Kolorystyka boksów informacyjnych dopasowana do motywu */
+    .selection-info { 
+        background-color: rgba(66, 133, 244, 0.1); 
+        color: inherit;
+        padding: 12px; 
+        border-radius: 8px; 
+        border-left: 5px solid #4285f4; 
+        margin-bottom: 15px; 
+        font-size: 14px; 
+    }
+
+    /* Przycisk 'primary' (zielony dla wybranych baz) */
+    button[kind="primary"] { 
+        background-color: #28a745 !important; 
+        color: white !important; 
+        border: none !important;
+    }
+
+    /* Dopasowanie tabel do ciemnego motywu */
+    .stTable {
+        background-color: transparent;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- 3. LOGIKA ROUTINGU ---
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v61_geo")
+        gl = Nominatim(user_agent="v62_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -87,9 +124,7 @@ def get_color(idx):
     colors = ['#4285f4', '#ea4335', '#fbbc05', '#34a853', '#ff6d00', '#4615b2', '#00bcd4']
     return colors[idx % len(colors)]
 
-st.markdown("<style>div.stButton > button { height: 45px; width: 100%; font-size: 18px !important; } .selection-info { background-color: #f0f4f8; padding: 10px; border-radius: 5px; border-left: 5px solid #4285f4; margin-bottom: 10px; font-size: 13px; } button[kind='primary'] { background-color: #28a745 !important; border-color: #28a745 !important; }</style>", unsafe_allow_html=True)
-
-# --- 3. SIDEBAR ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("🗺️ Menu")
     
@@ -112,19 +147,23 @@ with st.sidebar:
             sel_b = st.selectbox("Wybierz bazę:", ["---"] + list(st.session_state['saved_locations'].keys()))
             if sel_b != "---":
                 addr = st.session_state['saved_locations'][sel_b]
+                st.caption(f"Adres: {addr}")
                 c1, c2, c3 = st.columns(3)
-                if c1.button("🏠", key="b_s", type="primary" if st.session_state['start_name']==sel_b else "secondary"):
+                t_s = "primary" if st.session_state['start_name']==sel_b else "secondary"
+                t_m = "primary" if st.session_state['meta_name']==sel_b else "secondary"
+                if c1.button("🏠", key="b_s", type=t_s):
                     st.session_state.update({'start_name': sel_b, 'start_coords': get_lat_lng(addr)}); st.rerun()
-                if c2.button("🏁", key="b_m", type="primary" if st.session_state['meta_name']==sel_b else "secondary"):
+                if c2.button("🏁", key="b_m", type=t_m):
                     st.session_state.update({'meta_name': sel_b, 'meta_coords': get_lat_lng(addr)}); st.rerun()
-                if c3.button("🗑️", key="b_d"): 
+                if c3.button("🗑️", key="b_d"):
                     del st.session_state['saved_locations'][sel_b]; save_to_disk(); st.rerun()
+        st.divider()
         with st.form("new_b", clear_on_submit=True):
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-            if st.form_submit_button("Dodaj"): 
+            if st.form_submit_button("Dodaj bazę"):
                 st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
-    with st.expander("📁 Projekty", expanded=True):
+    with st.expander("📁 Projekty"):
         p_name = st.text_input("Nazwa projektu:")
         if st.button("💾 Zapisz Projekt") and p_name:
             st.session_state['projects'][p_name] = {
@@ -134,36 +173,31 @@ with st.sidebar:
                 'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries'],
                 'total_dist': st.session_state['total_dist'], 'total_time': st.session_state['total_time']
             }
-            save_to_disk(); st.toast("Zapisano projekt!")
-        
+            save_to_disk(); st.toast("Zapisano!")
         if st.session_state['projects']:
-            st.divider()
-            sel_p = st.selectbox("Wczytaj:", ["---"] + list(st.session_state['projects'].keys()))
+            sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
             if sel_p != "---":
                 cl, cd = st.columns([2, 1])
-                if cl.button("Otwórz"): 
-                    st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
-                if cd.button("🗑️", key="p_del_btn"):
-                    del st.session_state['projects'][sel_p]; save_to_disk(); st.rerun()
+                if cl.button("Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
+                if cd.button("🗑️", key="p_del"): del st.session_state['projects'][sel_p]; save_to_disk(); st.rerun()
 
-    st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
+    st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}), use_container_width=True)
 
-# --- 4. PANEL GŁÓWNY ---
+# --- 5. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator")
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not filtered_df.empty or sc:
-    mode = st.radio("Tryb:", ["Jedna trasa zbiorcza", "Oddzielne trasy dla plików"], horizontal=True)
+    mode = st.radio("Tryb pracy:", ["Jedna trasa zbiorcza", "Oddzielne trasy dla plików"], horizontal=True)
     
-    col1, col2 = st.columns([3, 1])
-    with col1:
+    col_r, col_c = st.columns([3, 1])
+    with col_r:
         if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
             if not (sc and mc): st.error("Wybierz Start i Metę!")
             else:
-                with st.spinner("Liczenie..."):
+                with st.spinner("Przeliczanie..."):
                     st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
                     groups = [filtered_df] if mode == "Jedna trasa zbiorcza" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
-                    
                     for i, group in enumerate(groups):
                         if group.empty: continue
                         curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
@@ -172,14 +206,12 @@ if not filtered_df.empty or sc:
                             nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
                             route.append(nxt); curr = nxt; unv.remove(nxt)
                         route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
-                        
                         geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
                         st.session_state['geometries'].append({"geom": geom, "color": get_color(i), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
-                        st.session_state['total_dist'] += d
-                        st.session_state['total_time'] += t
+                        st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                     st.rerun()
-    with col2:
+    with col_c:
         if st.button("🔄 RESET"):
             for k in ['data', 'optimized_list', 'geometries', 'total_dist', 'total_time', 'start_coords', 'meta_coords']:
                 st.session_state[k] = pd.DataFrame() if 'data' in k else ([] if k in ['optimized_list', 'geometries'] else None)
@@ -191,32 +223,27 @@ if not filtered_df.empty or sc:
         m2.metric("Czas", f"{int(st.session_state['total_time']//3600)}h {int((st.session_state['total_time']%3600)//60)}min")
         m3.metric("Liczba Tras", len(st.session_state['optimized_list']))
 
-    # Mapa
+    # Mapa (Folium automatycznie dobiera kontrast)
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
-    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home'), tooltip="START").add_to(m)
-    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag'), tooltip="META").add_to(m)
-    
+    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home')).add_to(m)
+    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag')).add_to(m)
     for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8, tooltip=g['name']).add_to(m)
-    
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     for opt_df in st.session_state['optimized_list']:
-        for i, r in opt_df.iterrows():
+        for _, r in opt_df.iterrows():
             if r['source_file'] != "Baza":
-                folium.CircleMarker([r['lat'], r['lng']], radius=6, color='black', fill=True, fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
+                folium.CircleMarker([r['lat'], r['lng']], radius=6, color='black', fill=True, fill_opacity=0.7).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v61")
+    st_folium(m, width="100%", height=550, key="map_v62")
 
-    # --- TABELA PRZYSTANKÓW ---
+    # Tabele przystanków
     if st.session_state['optimized_list']:
         st.markdown("### 📋 Plan Przejazdu")
         for i, opt_df in enumerate(st.session_state['optimized_list']):
-            rej_name = opt_df['source_file'].unique().tolist()
-            rej_name = [x for x in rej_name if x != "Baza"]
-            with st.expander(f"Trasa {i+1} - {' '.join(rej_name)}", expanded=True):
-                # Dodajemy numerację LP
+            rej = [x for x in opt_df['source_file'].unique() if x != "Baza"]
+            with st.expander(f"Trasa {i+1} - {' '.join(rej)}", expanded=True):
                 display_df = opt_df[['display_name', 'source_file']].copy()
                 display_df.index = range(1, len(display_df) + 1)
                 st.table(display_df)
-
 else:
-    st.info("👈 Wczytaj KML i wybierz bazy w panelu bocznym.")
+    st.info("👈 Wgraj KML i wybierz bazy. Interfejs dostosuje się do Twojego systemowego trybu jasnego/ciemnego.")
