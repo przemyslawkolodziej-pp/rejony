@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v66", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v67", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -47,7 +47,7 @@ if 'start_name' not in st.session_state: st.session_state.update({'start_name': 
 
 if not check_password(): st.stop()
 
-# --- 2. STYLE CSS (TRYB CIEMNY + PRZYCISKI) ---
+# --- 2. STYLE CSS ---
 st.markdown("""
 <style>
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
@@ -57,19 +57,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. LOGIKA I IKONY ---
-# Stylizowane pinezki (Push-Pins)
+# Adresy ikon pinezek (Google Maps Style)
 PIN_ICONS = {
-    'blue': 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-    'red': 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
-    'green': 'https://maps.google.com/mapfiles/ms/icons/green-dot.png',
-    'orange': 'https://maps.google.com/mapfiles/ms/icons/orange-dot.png',
-    'purple': 'https://maps.google.com/mapfiles/ms/icons/purple-dot.png',
-    'gray': 'https://maps.google.com/mapfiles/ms/icons/ltblue-dot.png'
+    'blue': 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+    'red': 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+    'green': 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
+    'orange': 'http://maps.google.com/mapfiles/ms/icons/orange-dot.png',
+    'purple': 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png',
+    'yellow': 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png',
+    'gray': 'http://maps.google.com/mapfiles/ms/icons/grey-dot.png'
 }
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v66_geo")
+        gl = Nominatim(user_agent="v67_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -100,7 +101,7 @@ def parse_kml(content, name):
     return pd.DataFrame(pts)
 
 def get_color_key(idx):
-    colors = ['blue', 'red', 'green', 'orange', 'purple']
+    colors = ['blue', 'red', 'green', 'orange', 'purple', 'yellow']
     return colors[idx % len(colors)]
 
 # --- 4. SIDEBAR ---
@@ -193,12 +194,6 @@ if not filtered_df.empty or sc:
                 st.session_state[k] = pd.DataFrame() if 'data' in k else ([] if k in ['optimized_list', 'geometries'] else None)
             st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"}); st.rerun()
 
-    # Statystyki
-    if st.session_state['total_dist']:
-        m1, m2 = st.columns(2)
-        m1.metric("Łączny Dystans", f"{st.session_state['total_dist']/1000:.2f} km")
-        m2.metric("Łączny Czas", f"{int(st.session_state['total_time']//3600)}h {int((st.session_state['total_time']%3600)//60)}min")
-
     # MAPA
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa'), tooltip="START").add_to(m)
@@ -210,14 +205,16 @@ if not filtered_df.empty or sc:
             folium.PolyLine([[c[1], c[0]] for c in st.session_state['geometries'][i]['geom']], color=color, weight=5, opacity=0.7).add_to(m)
             for _, r in opt_df.iterrows():
                 if r['source_file'] != "Baza":
-                    folium.Marker([r['lat'], r['lng']], icon=folium.CustomIcon(PIN_ICONS.get(color, PIN_ICONS['blue']), icon_size=(32, 32)), tooltip=r['display_name']).add_to(m)
+                    folium.Marker([r['lat'], r['lng']], 
+                                  icon=folium.CustomIcon(PIN_ICONS.get(color, PIN_ICONS['blue']), icon_size=(32, 32)), 
+                                  tooltip=r['display_name']).add_to(m)
     else:
         for _, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.CustomIcon(PIN_ICONS['gray'], icon_size=(32, 32)), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v66")
+    st_folium(m, width="100%", height=550, key="map_v67")
 
-    # TABELE PRZYSTANKÓW (PRZYWRÓCONE)
+    # TABELE
     if st.session_state['optimized_list']:
         st.markdown("### 📋 Plan Przejazdu")
         for i, opt_df in enumerate(st.session_state['optimized_list']):
@@ -226,5 +223,3 @@ if not filtered_df.empty or sc:
                 display_df = opt_df[['display_name', 'source_file']].copy()
                 display_df.index = range(1, len(display_df) + 1)
                 st.table(display_df)
-else:
-    st.info("👈 Wczytaj KML i wybierz bazy w panelu bocznym.")
