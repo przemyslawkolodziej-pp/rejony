@@ -79,7 +79,6 @@ st.markdown("""
 
 # --- 3. LOGIKA POMOCNICZA ---
 def get_folium_color(idx):
-    # Paleta standardowych kolorów Folium/Leaflet
     colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen', 'pink', 'lightblue', 'lightgreen']
     return colors[idx % len(colors)]
 
@@ -90,7 +89,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v99_geo")
+        gl = Nominatim(user_agent="v100_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -124,11 +123,34 @@ def parse_kml(content, name):
 with st.sidebar:
     st.header("⚙️ Zarządzanie")
     
+    # SEKCJA UPLOADU
     with st.expander("☁️ Wgrywanie KML", expanded=False):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
-            if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
+            if all_pts: 
+                new_data = pd.concat(all_pts, ignore_index=True)
+                st.session_state['data'] = pd.concat([st.session_state['data'], new_data], ignore_index=True).drop_duplicates()
+                st.rerun()
+
+    # NOWA SEKCJA: ZARZĄDZANIE WGRANYMI PLIKAMI
+    if not st.session_state['data'].empty:
+        with st.expander("📂 Zarządzaj rejonami", expanded=True):
+            u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
+            for f_name in u_files:
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"📄 {f_name}")
+                if c2.button("🗑️", key=f"del_file_{f_name}"):
+                    st.session_state['data'] = st.session_state['data'][st.session_state['data']['source_file'] != f_name].reset_index(drop=True)
+                    st.session_state['optimized_list'] = []
+                    st.session_state['geometries'] = []
+                    st.rerun()
+            st.markdown("---")
+            if st.button("🚨 USUŃ WSZYSTKIE REJONY"):
+                st.session_state['data'] = pd.DataFrame()
+                st.session_state['optimized_list'] = []
+                st.session_state['geometries'] = []
+                st.rerun()
 
     with st.expander("🏠 Bazy", expanded=True):
         if st.session_state['saved_locations']:
@@ -218,7 +240,6 @@ if not st.session_state['data'].empty or sc:
                     
                     for group in groups:
                         if group.empty: continue
-                        # Ustalenie koloru dla tej konkretnej trasy na podstawie pliku źródłowego
                         source_name = group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość"
                         route_color = file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa" else 'green'
                         
@@ -232,11 +253,8 @@ if not st.session_state['data'].empty or sc:
                         geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
                         st.session_state['geometries'].append({
-                            "geom": geom, 
-                            "color": route_color, 
-                            "dist": d, "time": t, 
-                            "pts_count": len(group), 
-                            "name": source_name, 
+                            "geom": geom, "color": route_color, "dist": d, "time": t, 
+                            "pts_count": len(group), "name": source_name, 
                             "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"
                         })
                     st.rerun()
@@ -258,7 +276,6 @@ if not st.session_state['data'].empty or sc:
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
     
-    # Rysowanie linii trasy w przypisanym kolorze
     for g in visible_geoms: 
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
         
