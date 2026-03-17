@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v69", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v70", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -51,17 +51,17 @@ if not check_password(): st.stop()
 st.markdown("""
 <style>
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
-    .selection-info { background-color: rgba(66, 133, 244, 0.1); padding: 12px; border-radius: 8px; border-left: 5px solid #4285f4; margin-bottom: 15px; font-size: 14px; }
+    .stats-card { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #444; margin-bottom: 20px; }
+    .route-sum { font-weight: bold; font-size: 18px; color: #28a745; border-top: 1px solid #444; padding-top: 10px; margin-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. LOGIKA KOLORÓW ---
+# --- 3. LOGIKA KOLORÓW I POMOCNICZA ---
 def get_folium_color(idx):
     colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
     return colors[idx % len(colors)]
 
-# Tworzymy mapę kolorów dla plików obecnych w sesji
 file_color_map = {}
 if not st.session_state['data'].empty:
     unique_files = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -70,7 +70,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v69_geo")
+        gl = Nominatim(user_agent="v70_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -104,7 +104,6 @@ def parse_kml(content, name):
 with st.sidebar:
     st.header("🗺️ Menu")
     with st.expander("🚀 Pliki i Widoczność", expanded=True):
-        st.markdown(f'<div class="selection-info">🏠 Start: {st.session_state["start_name"]}<br>🏁 Meta: {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
         up = st.file_uploader("Wgraj KML", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
@@ -168,7 +167,7 @@ if not filtered_df.empty or sc:
                     route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
                     geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                     st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa zbiorcza" else 'blue', "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
+                    st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa zbiorcza" else 'blue', "dist": d, "time": t, "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
                     st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                 st.rerun()
 
@@ -176,25 +175,40 @@ if not filtered_df.empty or sc:
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-    
-    # Rysowanie tras
     for g in st.session_state['geometries']:
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
-    
-    # Rysowanie pinezek - Kluczowa poprawka kolorów
     for _, r in filtered_df.iterrows():
-        # Kolor brany bezpośrednio z mapy plików, niezależnie od obliczeń
         color = file_color_map.get(r['source_file'], 'gray')
-        folium.Marker([r['lat'], r['lng']], 
-                      icon=folium.Icon(color=color, icon='circle', prefix='fa'), 
-                      tooltip=f"{r['display_name']} ({r['source_file']})").add_to(m)
+        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v69")
+    st_folium(m, width="100%", height=550, key="map_v70")
 
+    # --- NOWA SEKCJA WYNIKÓW ---
+    if st.session_state['geometries']:
+        st.markdown("### 📊 Wyniki Trasy")
+        cols = st.columns(min(len(st.session_state['geometries']), 4))
+        for idx, g in enumerate(st.session_state['geometries']):
+            with cols[idx % 4]:
+                st.markdown(f"""
+                <div class="stats-card">
+                    <span style="color:{g['color']}; font-size: 20px;">📍</span> <b>Trasa {idx+1}</b><br>
+                    <small>{g['name']}</small><br>
+                    <b>{g['dist']/1000:.2f} km</b><br>
+                    {int(g['time']//3600)}h {int((g['time']%3600)//60)}min
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.markdown(f"""
+        <div class="stats-card route-sum">
+            🌍 ŁĄCZNIE: {st.session_state['total_dist']/1000:.2f} km | {int(st.session_state['total_time']//3600)}h {int((st.session_state['total_time']%3600)//60)}min
+        </div>
+        """, unsafe_allow_html=True)
+
+    # TABELE
     if st.session_state['optimized_list']:
-        st.markdown("### 📋 Plan Przejazdu")
+        st.markdown("### 📋 Szczegółowy Plan")
         for i, opt_df in enumerate(st.session_state['optimized_list']):
-            with st.expander(f"Trasa {i+1}", expanded=True):
+            with st.expander(f"Tabela przystanków - Trasa {i+1}", expanded=False):
                 st.table(opt_df[['display_name', 'source_file']])
 else:
     st.info("👈 Wczytaj KML i wybierz bazy.")
