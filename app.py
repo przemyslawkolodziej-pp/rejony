@@ -31,7 +31,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v84", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v85", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -52,12 +52,11 @@ if not check_password(): st.stop()
 # --- 2. STYLE CSS ---
 st.markdown("""
 <style>
-    div.stButton > button { height: 45px; width: 100%; font-size: 14px !important; border-radius: 8px; margin-bottom: 5px; }
+    div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; }
     .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; font-size: 15px; }
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 3px solid #28a745; padding-top: 10px; margin-top: 20px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    .stExpander { border: 1px solid rgba(0,0,0,0.1); border-radius: 10px; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,7 +73,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v84_geo")
+        gl = Nominatim(user_agent="v85_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -116,31 +115,31 @@ with st.sidebar:
 
     with st.expander("🏠 Baza Lokalizacji", expanded=True):
         if st.session_state['saved_locations']:
-            sel_b = st.selectbox("Wybierz z listy:", ["---"] + list(st.session_state['saved_locations'].keys()))
+            sel_b = st.selectbox("Wybierz bazę:", ["---"] + list(st.session_state['saved_locations'].keys()))
             if sel_b != "---":
                 addr = st.session_state['saved_locations'][sel_b]
-                c1, c2, c3 = st.columns([1, 1, 0.6])
+                c1, c2, c3 = st.columns([1, 1, 1])
                 with c1:
                     is_s = st.session_state['start_name'] == sel_b
-                    if st.button(f"{'🟢' if is_s else '🏠'} Start", key=f"s_{sel_b}"):
+                    if st.button("🟢" if is_s else "🏠", key=f"s_{sel_b}"):
                         st.session_state.update({'start_name': sel_b, 'start_coords': get_lat_lng(addr)}); st.rerun()
                 with c2:
                     is_m = st.session_state['meta_name'] == sel_b
-                    if st.button(f"{'🔴' if is_m else '🏁'} Meta", key=f"m_{sel_b}"):
+                    if st.button("🔴" if is_m else "🏁", key=f"m_{sel_b}"):
                         st.session_state.update({'meta_name': sel_b, 'meta_coords': get_lat_lng(addr)}); st.rerun()
                 with c3:
-                    if st.button("🗑️ Usuń", key=f"d_{sel_b}"):
+                    if st.button("🗑️", key=f"d_{sel_b}"):
                         del st.session_state['saved_locations'][sel_b]; save_to_disk(); st.rerun()
         
         st.markdown("---")
         with st.form("new_b", clear_on_submit=True):
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-            if st.form_submit_button("➕ Dodaj nową"):
+            if st.form_submit_button("➕ Dodaj"):
                 if n and a: st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
     with st.expander("📁 Projekty", expanded=False):
         p_name = st.text_input("Zapisz jako:")
-        if st.button("💾 Zapisz Projekt") and p_name:
+        if st.button("💾 Zapisz") and p_name:
             st.session_state['projects'][p_name] = {
                 'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
                 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
@@ -148,7 +147,7 @@ with st.sidebar:
             }
             save_to_disk(); st.success("Zapisano!")
         if st.session_state['projects']:
-            sel_p = st.selectbox("Wczytaj:", ["---"] + list(st.session_state['projects'].keys()))
+            sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
             if sel_p != "---" and st.button("📂 Otwórz"):
                 st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
 
@@ -178,7 +177,7 @@ if not st.session_state['data'].empty or sc:
 
     col_calc, col_clear = st.columns([3, 1])
     with col_calc:
-        if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
+        if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
             if not (sc and mc): st.error("Ustaw Start i Metę!")
             else:
                 with st.spinner("Przeliczanie..."):
@@ -201,7 +200,7 @@ if not st.session_state['data'].empty or sc:
                         })
                     st.rerun()
     with col_clear:
-        if st.button("🗑️ CZYŚĆ TRASY", use_container_width=True):
+        if st.button("🗑️ CZYŚĆ", use_container_width=True):
             st.session_state.update({'optimized_list': [], 'geometries': []}); st.rerun()
 
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
@@ -219,7 +218,7 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v84")
+    map_data = st_folium(m, width="100%", height=550, key="map_v85")
 
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
@@ -247,4 +246,4 @@ if not st.session_state['data'].empty or sc:
                 with st.expander(f"📋 Tabela: {source if mode != 'Jedna trasa' else 'Trasa Zbiorcza'}"):
                     st.table(opt_df[['display_name', 'source_file']].reset_index(drop=True))
 else:
-    st.info("👈 Wgraj KML i ustaw bazy.")
+    st.info("👈 Wgraj KML i wybierz bazy.")
