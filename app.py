@@ -5,8 +5,9 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import re, math, json, requests, os
 
-# --- 1. ZAPIS I LOGOWANIE ---
+# --- 1. ZAPIS I LOGOWANIE (PRZYWRÓCONE) ---
 STORAGE_FILE = "data_storage.json"
+
 def save_to_disk():
     data = {
         "saved_locations": st.session_state['saved_locations'], 
@@ -27,9 +28,10 @@ def load_from_disk():
         except: pass
 
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
+
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v80", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v81", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -51,9 +53,9 @@ if not check_password(): st.stop()
 st.markdown("""
 <style>
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
-    .selection-info { background-color: rgba(0,0,0,0.05); padding: 12px; border-radius: 8px; border-left: 5px solid #4285f4; margin-bottom: 15px; font-size: 14px; }
-    .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; color: inherit; }
-    .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; margin-top: 10px; }
+    .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; }
+    .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -71,7 +73,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v80_geo")
+        gl = Nominatim(user_agent="v81_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -103,58 +105,76 @@ def parse_kml(content, name):
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
-    st.header("🗺️ Menu")
+    st.header("⚙️ Zarządzanie")
     with st.expander("🚀 Wgrywanie KML", expanded=True):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
             if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
 
-    with st.expander("📍 Bazy", expanded=True):
-        st.markdown(f'<div class="selection-info">🏠 <b>Start:</b> {st.session_state["start_name"]}<br>🏁 <b>Meta:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    with st.expander("🏠 Zarządzaj Bazami", expanded=True):
         if st.session_state['saved_locations']:
-            sel_b = st.selectbox("Wybierz bazę:", ["---"] + list(st.session_state['saved_locations'].keys()))
+            sel_b = st.selectbox("Wybierz lokalizację:", ["---"] + list(st.session_state['saved_locations'].keys()))
             if sel_b != "---":
                 addr = st.session_state['saved_locations'][sel_b]
                 c1, c2, c3 = st.columns([1, 1, 0.5])
                 with c1:
-                    if st.button("Start", key="s_btn", type="primary" if st.session_state['start_name']==sel_b else "secondary"):
+                    if st.button("Ustaw Start"):
                         st.session_state.update({'start_name': sel_b, 'start_coords': get_lat_lng(addr)}); st.rerun()
                 with c2:
-                    if st.button("Meta", key="m_btn", type="primary" if st.session_state['meta_name']==sel_b else "secondary"):
+                    if st.button("Ustaw Metę"):
                         st.session_state.update({'meta_name': sel_b, 'meta_coords': get_lat_lng(addr)}); st.rerun()
                 with c3:
-                    if st.button("🗑️", key="del_loc"): del st.session_state['saved_locations'][sel_b]; save_to_disk(); st.rerun()
+                    if st.button("🗑️"): del st.session_state['saved_locations'][sel_b]; save_to_disk(); st.rerun()
         with st.form("new_b", clear_on_submit=True):
-            n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-            if st.form_submit_button("Dodaj bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
+            n, a = st.text_input("Nazwa bazy:"), st.text_input("Adres:")
+            if st.form_submit_button("Dodaj nową bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
+
+    with st.expander("📁 Projekty", expanded=True):
+        p_name = st.text_input("Nazwa projektu do zapisu:")
+        if st.button("💾 Zapisz Projekt") and p_name:
+            st.session_state['projects'][p_name] = {
+                'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
+                'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
+                'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries']
+            }
+            save_to_disk(); st.success("Projekt zapisany!")
+        if st.session_state['projects']:
+            sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
+            if sel_p != "---" and st.button("Otwórz Projekt"):
+                st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
 # --- 5. PANEL GŁÓWNY ---
-st.title("🗺️ Optymalizator")
+st.title("🗺️ Optymalizator Tras")
+
+# --- NOWOŚĆ: PANEL START/META NAD MAPĄ ---
+c_start, c_meta = st.columns(2)
+with c_start:
+    st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+with c_meta:
+    st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
 
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-filtered_df = st.session_state['data']
 
 if not st.session_state['data'].empty or sc:
-    # FILTRY I STEROWANIE
+    # FILTRY
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-        v_files = st.multiselect("Zaznacz rejony:", u_files, default=u_files)
+        v_files = st.multiselect("Wybrane rejony (pigułki):", u_files, default=u_files)
         filtered_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_files)]
     
     with col_view:
-        st.write("👁️ Widoczność")
         show_pins = st.checkbox("Pokaż pinezki punktów", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
-        if not (sc and mc): st.error("Ustaw Start i Metę!")
-        elif filtered_df.empty: st.warning("Zaznacz rejon!")
+    if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
+        if not (sc and mc): st.error("Najpierw wybierz Start i Metę w panelu bocznym!")
+        elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
         else:
-            with st.spinner("Liczenie..."):
+            with st.spinner("Optymalizacja w toku..."):
                 st.session_state.update({'optimized_list': [], 'geometries': []})
                 groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
                 for group in groups:
@@ -174,7 +194,7 @@ if not st.session_state['data'].empty or sc:
                     })
                 st.rerun()
 
-    # FILTROWANIE TRAS NA MAPIE
+    # FILTROWANIE WIDOKU
     visible_geoms = st.session_state['geometries']
     if mode == "Oddzielne":
         visible_geoms = [g for g in st.session_state['geometries'] if g.get('source_file') in v_files]
@@ -189,34 +209,31 @@ if not st.session_state['data'].empty or sc:
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
     
-    # Rysowanie linii tras
     for g in visible_geoms:
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     
-    # Rysowanie pinezek (tylko jeśli włączone)
     if show_pins:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v80")
+    map_data = st_folium(m, width="100%", height=550, key="map_v81")
 
-    # USUWANIE (Działa nawet gdy pinezki są ukryte, jeśli klikniesz w "miejsce" punktu, ale lepiej usuwać przy włączonych)
+    # USUWANIE
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
         match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
         if not match.empty:
             t_idx, t_name = match.index[0], match.iloc[0]['display_name']
-            st.warning(f"Wybrano: {t_name}")
-            if st.button(f"🗑️ USUŃ PUNKT I WYCZYŚĆ TRASĘ"):
+            st.warning(f"Kliknięto punkt: {t_name}")
+            if st.button(f"🗑️ USUŃ PUNKT: {t_name}"):
                 st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
                 st.session_state.update({'optimized_list': [], 'geometries': []})
                 st.rerun()
 
     # STATYSTYKI
     if visible_geoms:
-        st.markdown("### 📊 Statystyki")
+        st.markdown("### 📊 Podsumowanie tras")
         cur_d, cur_t = sum(g['dist'] for g in visible_geoms), sum(g['time'] for g in visible_geoms)
-        st.markdown(f'<div class="stats-card route-sum">🌍 WIDOCZNE: {cur_d/1000:.2f} km | {int(cur_t//3600)}h {int((cur_t%3600)//60)}min</div>', unsafe_allow_html=True)
-
+        st.markdown(f'<div class="stats-card route-sum">🌍 ŁĄCZNIE DLA WIDOCZNYCH: {cur_d/1000:.2f} km | {int(cur_t//3600)}h {int((cur_t%3600)//60)}min</div>', unsafe_allow_html=True)
 else:
-    st.info("👈 Wgraj KML, aby zacząć.")
+    st.info("👈 Wgraj pliki KML oraz ustaw bazy w panelu bocznym.")
