@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v77", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v78", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -72,7 +72,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v77_geo")
+        gl = Nominatim(user_agent="v78_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -161,53 +161,7 @@ if not st.session_state['data'].empty or sc:
 
     mode = st.radio("Tryb pracy:", ["Jedna trasa zbiorcza", "Oddzielne trasy dla plików"], horizontal=True)
     
-    calc_col, info_col = st.columns([1, 1])
-    with calc_col:
-        do_calc = st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True)
-
-    # MAPA
-    all_pts_coords = [[sc['lat'], sc['lng']]] if sc else []
-    if mc: all_pts_coords.append([mc['lat'], mc['lng']])
-    for _, r in filtered_df.iterrows(): all_pts_coords.append([r['lat'], r['lng']])
-
-    m = folium.Map()
-    if all_pts_coords: m.fit_bounds(all_pts_coords)
-    else: m.location = [52.2, 19.2]; m.zoom_start = 6
-
-    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
-    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-    
-    for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
-    
-    for idx, r in filtered_df.iterrows():
-        color = file_color_map.get(r['source_file'], 'gray')
-        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
-    
-    # RENDEROWANIE MAPY I PRZECHWYTYWANIE KLIKNIĘĆ
-    map_data = st_folium(m, width="100%", height=550, key="map_v77")
-
-    # LOGIKA USUWANIA PO KLIKNIĘCIU W MARKER
-    if map_data.get("last_object_clicked"):
-        clicked_lat = map_data["last_object_clicked"]["lat"]
-        clicked_lng = map_data["last_object_clicked"]["lng"]
-        
-        # Szukamy punktu w danych o takich współrzędnych
-        match = st.session_state['data'][
-            (abs(st.session_state['data']['lat'] - clicked_lat) < 0.0001) & 
-            (abs(st.session_state['data']['lng'] - clicked_lng) < 0.0001)
-        ]
-        
-        if not match.empty:
-            target_idx = match.index[0]
-            target_name = match.iloc[0]['display_name']
-            st.warning(f"Wybrano punkt: **{target_name}**")
-            if st.button(f"🗑️ POTWIERDŹ USUNIĘCIE: {target_name}", type="primary"):
-                st.session_state['data'] = st.session_state['data'].drop(target_idx).reset_index(drop=True)
-                st.rerun()
-
-    # OBLICZENIA
-    if do_calc:
+    if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
         if not (sc and mc): st.error("Wybierz Start i Metę w panelu Bazy!")
         elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
         else:
@@ -228,6 +182,40 @@ if not st.session_state['data'].empty or sc:
                         "dist": d, "time": t, "pts_count": len(group), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"
                     })
                     st.session_state['total_dist'] += d; st.session_state['total_time'] += t
+                st.rerun()
+
+    # MAPA
+    all_pts_coords = [[sc['lat'], sc['lng']]] if sc else []
+    if mc: all_pts_coords.append([mc['lat'], mc['lng']])
+    for _, r in filtered_df.iterrows(): all_pts_coords.append([r['lat'], r['lng']])
+
+    m = folium.Map()
+    if all_pts_coords: m.fit_bounds(all_pts_coords)
+    else: m.location = [52.2, 19.2]; m.zoom_start = 6
+
+    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
+    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
+    for g in st.session_state['geometries']:
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
+    for idx, r in filtered_df.iterrows():
+        color = file_color_map.get(r['source_file'], 'gray')
+        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
+    
+    map_data = st_folium(m, width="100%", height=550, key="map_v78")
+
+    # LOGIKA USUWANIA Z AUTOMATYCZNYM CZYSZCZENIEM TRASY
+    if map_data.get("last_object_clicked"):
+        clicked_lat, clicked_lng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
+        match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clicked_lat) < 0.0001) & (abs(st.session_state['data']['lng'] - clicked_lng) < 0.0001)]
+        
+        if not match.empty:
+            target_idx, target_name = match.index[0], match.iloc[0]['display_name']
+            st.warning(f"Wybrano punkt: **{target_name}**")
+            if st.button(f"🗑️ USUŃ I WYCZYŚĆ TRASĘ: {target_name}", type="primary"):
+                # 1. Usuwamy punkt z bazy danych
+                st.session_state['data'] = st.session_state['data'].drop(target_idx).reset_index(drop=True)
+                # 2. Czyścimy wyniki trasy (wymuszamy ponowne obliczenie)
+                st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
                 st.rerun()
 
     # WYNIKI
