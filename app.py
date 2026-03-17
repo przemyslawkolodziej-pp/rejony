@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v70", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v71", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -70,7 +70,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v70_geo")
+        gl = Nominatim(user_agent="v71_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -171,8 +171,18 @@ if not filtered_df.empty or sc:
                     st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                 st.rerun()
 
-    # MAPA
-    m = folium.Map(location=[52.2, 19.2], zoom_start=6)
+    # --- MAPA Z DOPASOWANIEM WIDOKU ---
+    all_points = []
+    if sc: all_points.append([sc['lat'], sc['lng']])
+    if mc: all_points.append([mc['lat'], mc['lng']])
+    for _, r in filtered_df.iterrows(): all_points.append([r['lat'], r['lng']])
+
+    m = folium.Map() # Brak stałego zoom/location - będzie ustawiony dynamicznie
+    if all_points:
+        m.fit_bounds(all_points) # DOPASOWANIE WIDOKU DO WSZYSTKICH PUNKTÓW
+    else:
+        m.location = [52.2, 19.2]; m.zoom_start = 6
+
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
     for g in st.session_state['geometries']:
@@ -181,9 +191,9 @@ if not filtered_df.empty or sc:
         color = file_color_map.get(r['source_file'], 'gray')
         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v70")
+    st_folium(m, width="100%", height=550, key="map_v71")
 
-    # --- NOWA SEKCJA WYNIKÓW ---
+    # --- SEKCJA WYNIKÓW ---
     if st.session_state['geometries']:
         st.markdown("### 📊 Wyniki Trasy")
         cols = st.columns(min(len(st.session_state['geometries']), 4))
