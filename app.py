@@ -5,7 +5,9 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import re, math, json, requests, os
 
-# --- 1. ZAPIS I LOGOWANIE ---
+# --- 1. KONFIGURACJA STRONY ---
+st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
+
 STORAGE_FILE = "data_storage.json"
 
 def save_to_disk():
@@ -39,11 +41,20 @@ def load_from_disk():
                 st.session_state['projects'] = loaded_projects
         except: pass
 
-if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
+# Inicjalizacja sesji
+for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
+    if key not in st.session_state: 
+        if key == 'authenticated': st.session_state[key] = False
+        elif key == 'data': st.session_state[key] = pd.DataFrame()
+        elif key == 'reset_counter': st.session_state[key] = 0
+        elif key in ['optimized_list', 'geometries']: st.session_state[key] = []
+        elif key in ['saved_locations', 'projects']: st.session_state[key] = {}
+        else: st.session_state[key] = None
+
+if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -52,13 +63,6 @@ def check_password():
                 st.session_state['authenticated'] = True; load_from_disk(); st.rerun()
             else: st.error("❌ Błędne hasło")
     return False
-
-# Inicjalizacja sesji
-for key in ['data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
-    if key not in st.session_state: 
-        st.session_state[key] = pd.DataFrame() if key == 'data' else (0 if key == 'reset_counter' else ([] if key in ['optimized_list', 'geometries'] else ({} if key in ['saved_locations', 'projects'] else None)))
-
-if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
 if not check_password(): st.stop()
 
@@ -70,7 +74,6 @@ st.markdown("""
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 3px solid #28a745; padding-top: 10px; margin-top: 20px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    .small-clear-btn button { height: 30px !important; font-size: 14px !important; padding: 0px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,7 +89,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v94_geo")
+        gl = Nominatim(user_agent="v98_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -119,15 +122,16 @@ def parse_kml(content, name):
 # --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Zarządzanie")
-    with st.expander("🚀 Wgrywanie KML", expanded=False):
+    
+    # SEKCJA UPLOADU Z CHMURKĄ
+    with st.expander("☁️ Wgrywanie KML", expanded=False):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
             if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
 
-    with st.expander("🏠 Baza Lokalizacji", expanded=True):
+    with st.expander("🏠 Bazy", expanded=True):
         if st.session_state['saved_locations']:
-            # SORTOWANIE ALFABETYCZNE BAZY
             sorted_locs = sorted(st.session_state['saved_locations'].keys())
             sel_b = st.selectbox("Wybierz bazę:", ["---"] + sorted_locs)
             if sel_b != "---":
@@ -159,7 +163,6 @@ with st.sidebar:
             save_to_disk(); st.success("Zapisano!"); st.rerun()
         if st.session_state['projects']:
             st.markdown("---")
-            # SORTOWANIE ALFABETYCZNE PROJEKTÓW
             sorted_projs = sorted(st.session_state['projects'].keys())
             sel_p = st.selectbox("Wybierz projekt:", ["---"] + sorted_projs)
             if sel_p != "---":
@@ -180,14 +183,14 @@ c_start_box, c_meta_box = st.columns(2)
 with c_start_box:
     st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state['start_name'] != "Nie wybrano":
-        if st.button("✖", key="clear_start", help="Wyczyść Start"):
+        if st.button("✖", key="clear_start"):
             st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None, 'geometries': [], 'optimized_list': []})
             st.rerun()
 
 with c_meta_box:
     st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state['meta_name'] != "Nie wybrano":
-        if st.button("✖", key="clear_meta", help="Wyczyść Metę"):
+        if st.button("✖", key="clear_meta"):
             st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None, 'geometries': [], 'optimized_list': []})
             st.rerun()
 
@@ -248,7 +251,6 @@ if not st.session_state['data'].empty or sc:
     
     map_data = st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
 
-    # --- USUWANIE PINEZEK ---
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
         match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
