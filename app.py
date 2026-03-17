@@ -8,8 +8,42 @@ import math
 import json
 import requests
 import hashlib
+import os
 
-# --- 1. SYSTEM LOGOWANIA (STABILNY) ---
+# --- 1. FUNKCJE ZAPISU TRWAŁEGO (DYSK SERWERA) ---
+STORAGE_FILE = "data_storage.json"
+
+def save_to_disk():
+    """Zapisuje bazy i projekty do pliku JSON na serwerze."""
+    data_to_save = {
+        "saved_locations": st.session_state['saved_locations'],
+        "projects": {
+            k: {**v, "data": v["data"].to_dict()} 
+            for k, v in st.session_state['projects'].items()
+        }
+    }
+    with open(STORAGE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data_to_save, f, ensure_ascii=False, indent=4)
+
+def load_from_disk():
+    """Wczytuje dane z pliku JSON przy starcie."""
+    if os.path.exists(STORAGE_FILE):
+        try:
+            with open(STORAGE_FILE, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+                st.session_state['saved_locations'] = stored.get("saved_locations", {})
+                
+                # Konwersja projektów z dict z powrotem na DataFrame
+                raw_projects = stored.get("projects", {})
+                processed_projects = {}
+                for k, v in raw_projects.items():
+                    v["data"] = pd.DataFrame(v["data"])
+                    processed_projects[k] = v
+                st.session_state['projects'] = processed_projects
+        except Exception as e:
+            st.error(f"Błąd wczytywania bazy z dysku: {e}")
+
+# --- 2. SYSTEM LOGOWANIA ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
@@ -24,20 +58,27 @@ def check_password():
         if st.form_submit_button("Zaloguj"):
             if "password" in st.secrets and pwd_input == st.secrets["password"]:
                 st.session_state['authenticated'] = True
+                # Po zalogowaniu wczytujemy dane z dysku
+                load_from_disk()
                 st.rerun()
             else:
                 st.error("❌ Błędne hasło")
     return False
 
+# Inicjalizacja kluczy sesji zanim sprawdzimy hasło (żeby load_from_disk miało gdzie pisać)
+for key in ['data', 'saved_locations', 'projects', 'start_coords', 'meta_coords']:
+    if key not in st.session_state: 
+        st.session_state[key] = pd.DataFrame() if 'data' in key else (None if 'coords' in key else {})
+
 if not check_password():
     st.stop()
 
-# --- 2. FUNKCJE POMOCNICZE (ROUTING, GEOPY, KML) ---
+# --- 3. FUNKCJE POMOCNICZE (BEZ ZMIAN) ---
 @st.cache_data(show_spinner=False)
 def get_lat_lng(address):
     if not address: return None
     try:
-        gl = Nominatim(user_agent="v47_geocoder")
+        gl = Nominatim(user_agent="v48_geocoder")
         loc = gl.geocode(address, timeout=10)
         if loc: return {"lat": loc.latitude, "lng": loc.longitude}
     except: pass
@@ -48,8 +89,7 @@ def get_road_distance(lat1, lon1, lat2, lon2):
         url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"
         r = requests.get(url, timeout=5)
         res = r.json()
-        if res['code'] == 'Ok':
-            return res['routes'][0]['distance'], res['routes'][0]['duration']
+        if res['code'] == 'Ok': return res['routes'][0]['distance'], res['routes'][0]['duration']
     except: pass
     return math.sqrt((lat1-lat2)**2 + (lon1-lon2)**2) * 111000, 0
 
@@ -57,12 +97,10 @@ def get_full_route_info(coords_list):
     coords_str = ";".join([f"{c[1]},{c[0]}" for c in coords_list])
     url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
     try:
-        r = requests.get(url, timeout=10)
-        res = r.json()
+        r = requests.get(url, timeout=10); res = r.json()
         if res['code'] == 'Ok':
             return {'geometry': res['routes'][0]['geometry']['coordinates'], 
-                    'distance': res['routes'][0]['distance'], 
-                    'duration': res['routes'][0]['duration']}
+                    'distance': res['routes'][0]['distance'], 'duration': res['routes'][0]['duration']}
     except: return None
 
 def parse_kml_robust(file_content, file_name="unknown"):
@@ -81,21 +119,13 @@ def get_color_for_file(file_name):
     hash_idx = int(hashlib.md5(file_name.encode()).hexdigest(), 16) % len(folium_colors)
     return folium_colors[hash_idx]
 
-# --- 3. KONFIGURACJA UI ---
+# --- 4. KONFIGURACJA UI ---
 st.set_page_config(page_title="Optymalizator Drogowy", page_icon="🗺️", layout="wide")
 
-# CSS dla wyśrodkowania kosza i wyglądu baz
-st.markdown("""
-    <style>
+st.markdown("""<style>
     .centered-trash { display: flex; align-items: center; justify-content: center; height: 100%; padding-top: 10px; }
     .selection-info { font-size: 13px; color: #1e1e1e; background-color: #e8f0fe; padding: 12px; border-radius: 8px; border-left: 6px solid #4285f4; margin-bottom: 15px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# Inicjalizacja stanów
-for key in ['data', 'saved_locations', 'projects', 'start_coords', 'meta_coords']:
-    if key not in st.session_state: 
-        st.session_state[key] = pd.DataFrame() if 'data' in key else (None if 'coords' in key else {})
+    </style>""", unsafe_allow_html=True)
 
 if 'start_name' not in st.session_state: 
     st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano", 'start_addr': "", 'meta_addr': ""})
@@ -111,20 +141,20 @@ with st.sidebar:
             all_pts = [parse_kml_robust(f.read().decode('utf-8'), f.name) for f in up_kmls]
             if all_pts:
                 st.session_state['data'] = pd.concat(all_pts, ignore_index=True)
-                if 'optimized' in st.session_state: del st.session_state['optimized']
                 st.rerun()
         if st.button("🗑️ Wyczyść aktualne dane"):
             st.session_state['data'] = pd.DataFrame()
             st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano", 'start_addr': "", 'meta_addr': ""})
             st.session_state['start_coords'] = st.session_state['meta_coords'] = None
-            if 'optimized' in st.session_state: del st.session_state['optimized']
             st.rerun()
 
     with st.expander("📍 Twoje Bazy", expanded=True):
         with st.form("add_base_form", clear_on_submit=True):
             n_n, n_a = st.text_input("Nazwa bazy:"), st.text_input("Adres bazy:")
             if st.form_submit_button("Dodaj bazę") and n_n and n_a:
-                st.session_state['saved_locations'][n_n] = n_a; st.rerun()
+                st.session_state['saved_locations'][n_n] = n_a
+                save_to_disk() # ZAPIS NA DYSK
+                st.rerun()
         
         st.divider()
         for n, a in st.session_state['saved_locations'].items():
@@ -133,21 +163,21 @@ with st.sidebar:
             with c1:
                 if st.button("Ustaw Start", key=f"s_{n}", use_container_width=True):
                     st.session_state.update({'start_addr': a, 'start_name': n})
-                    st.session_state['start_coords'] = get_lat_lng(a)
-                    st.rerun()
+                    st.session_state['start_coords'] = get_lat_lng(a); st.rerun()
             with c2:
                 if st.button("Ustaw Metę", key=f"m_{n}", use_container_width=True):
                     st.session_state.update({'meta_addr': a, 'meta_name': n})
-                    st.session_state['meta_coords'] = get_lat_lng(a)
-                    st.rerun()
+                    st.session_state['meta_coords'] = get_lat_lng(a); st.rerun()
             with c3:
                 st.markdown('<div class="centered-trash">', unsafe_allow_html=True)
                 if st.button("🗑️", key=f"d_{n}"):
-                    del st.session_state['saved_locations'][n]; st.rerun()
+                    del st.session_state['saved_locations'][n]
+                    save_to_disk() # ZAPIS NA DYSK
+                    st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
             st.divider()
 
-    with st.expander("📁 Projekty"):
+    with st.expander("📁 Projekty", expanded=False):
         p_name = st.text_input("Nazwa projektu:")
         if st.button("Zapisz bieżący stan") and p_name:
             st.session_state['projects'][p_name] = {
@@ -156,19 +186,28 @@ with st.sidebar:
                 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 
                 'meta_coords': st.session_state['meta_coords']
             }
+            save_to_disk() # ZAPIS NA DYSK
+            st.toast(f"Zapisano projekt: {p_name}")
+        
         if st.session_state['projects']:
             sel_p = st.selectbox("Wczytaj projekt:", list(st.session_state['projects'].keys()))
-            if st.button("Wczytaj"):
+            cp1, cp2 = st.columns(2)
+            if cp1.button("Wczytaj"):
                 st.session_state.update(st.session_state['projects'][sel_p])
-                if 'optimized' in st.session_state: del st.session_state['optimized']
+                st.rerun()
+            if cp2.button("Usuń projekt"):
+                del st.session_state['projects'][sel_p]
+                save_to_disk() # ZAPIS NA DYSK
                 st.rerun()
 
-    with st.expander("💾 Backup"):
+    with st.expander("💾 Kopia zapasowa (Plik)"):
         export_data = {"saved_locations": st.session_state['saved_locations'], 
                        "projects": {k: {**v, "data": v["data"].to_dict()} for k, v in st.session_state['projects'].items()}}
         st.download_button("📥 Pobierz JSON", data=json.dumps(export_data), file_name="backup.json")
 
-    st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}), use_container_width=True)
+    if st.button("🔓 WYLOGUJ", use_container_width=True):
+        st.session_state['authenticated'] = False
+        st.rerun()
 
 # --- PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Drogowy")
@@ -177,56 +216,13 @@ df = st.session_state['data']
 sc = st.session_state['start_coords']
 mc = st.session_state['meta_coords']
 
-# Logika unikania nakładania (Offset dla Mety, jeśli adresy są identyczne)
+# Offset dla Mety jeśli adresy identyczne
 display_mc = mc.copy() if mc else None
 if sc and mc and sc['lat'] == mc['lat'] and sc['lng'] == mc['lng']:
-    display_mc['lat'] += 0.00012
-    display_mc['lng'] += 0.00012
+    display_mc['lat'] += 0.00012; display_mc['lng'] += 0.00012
 
 if not df.empty or sc or mc:
     if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ (OSRM)", type="primary", use_container_width=True):
         if sc and mc:
             with st.spinner("Szukanie najkrótszej drogi..."):
-                curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": f"START: {st.session_state['start_name']}", "source_file": "START"}
-                route = [curr]
-                unvisited = df.to_dict('records')
-                while unvisited:
-                    nxt = min(unvisited, key=lambda x: get_road_distance(curr['lat'], curr['lng'], x['lat'], x['lng'])[0])
-                    route.append(nxt); curr = nxt; unvisited.remove(nxt)
-                route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": f"META: {st.session_state['meta_name']}", "source_file": "META"})
-                st.session_state['optimized'] = pd.DataFrame(route)
-                f_i = get_full_route_info([[r['lat'], r['lng']] for r in route])
-                if f_i: st.session_state.update({'geometry': f_i['geometry'], 'dist': f_i['distance'], 'time': f_i['duration']})
-                st.rerun()
-
-    if 'dist' in st.session_state:
-        m1, m2 = st.columns(2)
-        m1.metric("Dystans", f"{st.session_state['dist']/1000:.2f} km")
-        m2.metric("Czas", f"{int(st.session_state['time']//3600)}h {int((st.session_state['time']%3600)//60)}min")
-
-    # MAPA
-    view_df = st.session_state.get('optimized', df)
-    m = folium.Map(location=[52.2, 19.2], zoom_start=6)
-    
-    if sc:
-        folium.Marker([sc['lat'], sc['lng']], tooltip="START", icon=folium.Icon(color='green', icon='play')).add_to(m)
-    if display_mc:
-        folium.Marker([display_mc['lat'], display_mc['lng']], tooltip="META", icon=folium.Icon(color='red', icon='stop')).add_to(m)
-
-    for i, r in view_df.iterrows():
-        if r['source_file'] not in ["START", "META"]:
-            folium.Marker([r['lat'], r['lng']], tooltip=f"{r['display_name']} ({r['source_file']})",
-                          icon=folium.Icon(color=get_color_for_file(r['source_file']))).add_to(m)
-    
-    if 'geometry' in st.session_state:
-        folium.PolyLine([[c[1], c[0]] for c in st.session_state['geometry']], color="#4285f4", weight=5).add_to(m)
-        m.fit_bounds([[sc['lat'], sc['lng']], [mc['lat'], mc['lng']]])
-
-    st_folium(m, width="100%", height=550, key=f"map_{len(view_df)}")
-
-    # TABELA (display_name wizualnie jako Etykieta)
-    st.markdown("### 📋 Kolejność przystanków")
-    st.dataframe(view_df[['display_name', 'source_file']], use_container_width=True, 
-                 column_config={"display_name": "Etykieta", "source_file": "Źródło"})
-else:
-    st.info("👈 Wgraj KML i ustaw Start/Metę w panelu bocznym.")
+                curr = {"lat": sc['lat'], "
