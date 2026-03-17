@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v73", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v74", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -58,7 +58,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. LOGIKA I POMOCNICZE ---
+# --- 3. LOGIKA ---
 def get_folium_color(idx):
     colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
     return colors[idx % len(colors)]
@@ -71,7 +71,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v73_geo")
+        gl = Nominatim(user_agent="v74_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -136,7 +136,6 @@ with st.sidebar:
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("Dodaj bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
-    # --- PRZYWRÓCONA SEKCJA PROJEKTÓW ---
     with st.expander("📁 Projekty", expanded=False):
         p_name = st.text_input("Nazwa projektu:")
         if st.button("💾 Zapisz Projekt") and p_name:
@@ -146,7 +145,7 @@ with st.sidebar:
                 'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries'],
                 'total_dist': st.session_state['total_dist'], 'total_time': st.session_state['total_time']
             }
-            save_to_disk(); st.toast("Zapisano projekt!")
+            save_to_disk(); st.toast("Zapisano!")
         
         if st.session_state['projects']:
             st.divider()
@@ -204,21 +203,23 @@ if not filtered_df.empty or sc:
         color = file_color_map.get(r['source_file'], 'gray')
         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v73")
+    st_folium(m, width="100%", height=550, key="map_v74")
 
-    # SEKCJA WYNIKÓW
+    # WYNIKI
     if st.session_state['geometries']:
         st.markdown("### 📊 Wyniki Trasy")
         cols = st.columns(min(len(st.session_state['geometries']), 4))
         for idx, g in enumerate(st.session_state['geometries']):
             with cols[idx % 4]:
+                # Zabezpieczenie przed KeyError: get() z domyślną wartością
+                pts = g.get('pts_count', 'Brak danych')
                 st.markdown(f"""
                 <div class="stats-card">
                     <span style="color:{g['color']}; font-size: 20px;">📍</span> <b>Trasa {idx+1}</b><br>
-                    <small>{g['name']}</small><br>
+                    <small>{g.get('name', 'Trasa')}</small><br>
                     <b>Dystans: {g['dist']/1000:.2f} km</b><br>
                     Czas: {int(g['time']//3600)}h {int((g['time']%3600)//60)}min<br>
-                    Punkty: {g['pts_count']}
+                    Punkty: {pts}
                 </div>
                 """, unsafe_allow_html=True)
         
