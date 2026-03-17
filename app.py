@@ -63,10 +63,10 @@ if 'start_name' not in st.session_state:
 
 if not check_password(): st.stop()
 
-# --- 3. FUNKCJE ROUTINGU I PARSERY (Chunking 100+) ---
+# --- 3. FUNKCJE POMOCNICZE ---
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v53_geocoder")
+        gl = Nominatim(user_agent="v54_geocoder")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -123,16 +123,11 @@ with st.sidebar:
             all_pts = [parse_kml_robust(f.read().decode('utf-8'), f.name) for f in up_kmls]
             if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
 
-    # --- POPRAWIONA SEKCJA TWOJE BAZY Z LISTĄ ROZWIJANĄ ---
+    # --- SEKCJA TWOJE BAZY (NOWA KOLEJNOŚĆ) ---
     with st.expander("📍 Twoje Bazy", expanded=True):
-        with st.form("add_base_form", clear_on_submit=True):
-            n_n, n_a = st.text_input("Nazwa bazy:"), st.text_input("Adres bazy:")
-            if st.form_submit_button("Dodaj bazę") and n_n and n_a:
-                st.session_state['saved_locations'][n_n] = n_a; save_to_disk(); st.rerun()
-        
-        st.divider()
+        # 1. NAJPIERW LISTA WYBORU
         if st.session_state['saved_locations']:
-            selected_base_name = st.selectbox("Wybierz bazę z listy:", ["--- Wybierz ---"] + list(st.session_state['saved_locations'].keys()))
+            selected_base_name = st.selectbox("Wybierz bazę:", ["--- Wybierz ---"] + list(st.session_state['saved_locations'].keys()))
             
             if selected_base_name != "--- Wybierz ---":
                 addr = st.session_state['saved_locations'][selected_base_name]
@@ -153,6 +148,15 @@ with st.sidebar:
                     st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.write("Brak zapisanych baz.")
+
+        st.divider()
+        
+        # 2. POTEM FORMULARZ DODAWANIA
+        st.markdown("**Dodaj nową bazę:**")
+        with st.form("add_base_form", clear_on_submit=True):
+            n_n, n_a = st.text_input("Nazwa bazy:"), st.text_input("Adres bazy:")
+            if st.form_submit_button("Dodaj bazę") and n_n and n_a:
+                st.session_state['saved_locations'][n_n] = n_a; save_to_disk(); st.rerun()
 
     with st.expander("📁 Projekty"):
         p_name = st.text_input("Nazwa projektu:")
@@ -204,7 +208,7 @@ if not df.empty or sc or mc:
         m1, m2, m3 = st.columns(3)
         m1.metric("Dystans", f"{st.session_state['dist']/1000:.2f} km")
         m2.metric("Czas", f"{int(st.session_state['time']//3600)}h {int((st.session_state['time']%3600)//60)}min")
-        m3.metric("Liczba punktów", len(st.session_state.get('optimized', [])))
+        m3.metric("Punkty", len(st.session_state.get('optimized', [])))
 
     view_df = st.session_state.get('optimized', df)
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
@@ -230,4 +234,4 @@ if not df.empty or sc or mc:
         table_df.index = range(1, len(table_df) + 1)
         st.dataframe(table_df, use_container_width=True)
 else:
-    st.info("👈 Wczytaj pliki KML i ustaw bazy z listy rozwijanej.")
+    st.info("👈 Wczytaj KML i wybierz bazy z listy powyżej.")
