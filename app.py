@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v75", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v76", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -55,8 +55,7 @@ st.markdown("""
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; color: inherit; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; margin-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    /* Stylizacja multiselect jako pigułki */
-    span[data-baseweb="tag"] { background-color: #4285f4 !important; color: white !important; border-radius: 20px !important; padding-right: 8px !important; }
+    span[data-baseweb="tag"] { background-color: #4285f4 !important; color: white !important; border-radius: 20px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,7 +72,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v75_geo")
+        gl = Nominatim(user_agent="v76_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -106,7 +105,6 @@ def parse_kml(content, name):
 # --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("🗺️ Menu")
-    
     with st.expander("🚀 Wgrywanie KML", expanded=True):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
@@ -155,7 +153,14 @@ sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 filtered_df = st.session_state['data']
 
 if not st.session_state['data'].empty or sc:
-    # --- NOWE PIGUŁKI WYBORU REJONÓW ---
+    # OBSŁUGA USUWANIA Z MAPY (przed renderowaniem)
+    query_params = st.query_params
+    if "delete_idx" in query_params:
+        idx_to_del = int(query_params["delete_idx"])
+        st.session_state['data'] = st.session_state['data'].drop(idx_to_del).reset_index(drop=True)
+        st.query_params.clear()
+        st.rerun()
+
     if not st.session_state['data'].empty:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
         v_files = st.multiselect("Zaznacz rejony do uwzględnienia:", u_files, default=u_files)
@@ -165,7 +170,7 @@ if not st.session_state['data'].empty or sc:
     
     if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
         if not (sc and mc): st.error("Wybierz Start i Metę w panelu Bazy!")
-        elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon (pigułkę)!")
+        elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
         else:
             with st.spinner("Przeliczanie..."):
                 st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
@@ -197,13 +202,19 @@ if not st.session_state['data'].empty or sc:
 
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
+    
     for g in st.session_state['geometries']:
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
-    for _, r in filtered_df.iterrows():
-        color = file_color_map.get(r['source_file'], 'gray')
-        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v75")
+    # Renderowanie pinezek z opcją usuwania
+    for idx, r in filtered_df.iterrows():
+        color = file_color_map.get(r['source_file'], 'gray')
+        # Tworzenie HTML dla przycisku w popupie (wykorzystuje query_params do komunikacji)
+        del_btn = f"""<br><a href='?delete_idx={idx}' target='_self'><button style='background-color: #ff4b4b; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;'>🗑️ Usuń ten punkt</button></a>"""
+        popup_html = f"<b>{r['display_name']}</b><br>Plik: {r['source_file']}{del_btn}"
+        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), popup=folium.Popup(popup_html, max_width=200)).add_to(m)
+    
+    st_folium(m, width="100%", height=550, key="map_v76")
 
     # WYNIKI
     if st.session_state['geometries']:
