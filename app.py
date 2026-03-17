@@ -31,7 +31,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v82", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v83", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -55,9 +55,8 @@ st.markdown("""
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
     .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; font-size: 15px; }
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
-    .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; }
+    .route-sum { font-weight: bold; font-size: 18px; border-top: 3px solid #28a745; padding-top: 10px; margin-top: 20px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    .stCheckbox { margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,7 +73,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v82_geo")
+        gl = Nominatim(user_agent="v83_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -137,7 +136,8 @@ with st.sidebar:
             st.session_state['projects'][p_name] = {
                 'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
                 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-                'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries']
+                'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 
+                'geometries': st.session_state['geometries']
             }
             save_to_disk(); st.success("Projekt zapisany!")
         if st.session_state['projects']:
@@ -160,7 +160,7 @@ with c_meta:
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty or sc:
-    # FILTRY I WIDOK
+    # FILTRY
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -169,16 +169,15 @@ if not st.session_state['data'].empty or sc:
     
     with col_view:
         show_pins = st.checkbox("Pokaż pinezki punktów", value=True)
-        mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
+        mode = st.radio("Tryb pracy:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    # PRZYCISKI AKCJI
+    # AKCJE
     col_calc, col_clear = st.columns([3, 1])
     with col_calc:
         if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
-            if not (sc and mc): st.error("Najpierw wybierz Start i Metę w panelu bocznym!")
-            elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
+            if not (sc and mc): st.error("Najpierw ustaw Start i Metę!")
             else:
-                with st.spinner("Optymalizacja..."):
+                with st.spinner("Przeliczanie..."):
                     st.session_state.update({'optimized_list': [], 'geometries': []})
                     groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
                     for group in groups:
@@ -189,6 +188,7 @@ if not st.session_state['data'].empty or sc:
                             route.append(nxt); curr = nxt; unv.remove(nxt)
                         route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
                         geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
+                        
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
                         st.session_state['geometries'].append({
                             "geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), 
@@ -199,10 +199,9 @@ if not st.session_state['data'].empty or sc:
                     st.rerun()
     with col_clear:
         if st.button("🗑️ WYCZYŚĆ TRASY", use_container_width=True):
-            st.session_state.update({'optimized_list': [], 'geometries': []})
-            st.rerun()
+            st.session_state.update({'optimized_list': [], 'geometries': []}); st.rerun()
 
-    # FILTROWANIE WIDOKU
+    # FILTROWANIE WIDOCZNOŚCI GEOMETRII
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
 
     # MAPA
@@ -214,15 +213,12 @@ if not st.session_state['data'].empty or sc:
 
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-    
-    for g in visible_geoms:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
-    
+    for g in visible_geoms: folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     if show_pins:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v82")
+    map_data = st_folium(m, width="100%", height=550, key="map_v83")
 
     # USUWANIE PUNKTU
     if show_pins and map_data.get("last_object_clicked"):
@@ -230,16 +226,39 @@ if not st.session_state['data'].empty or sc:
         match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
         if not match.empty:
             t_idx, t_name = match.index[0], match.iloc[0]['display_name']
-            st.warning(f"Kliknięto punkt: {t_name}")
-            if st.button(f"🗑️ POTWIERDŹ USUNIĘCIE PUNKTU: {t_name}"):
+            st.warning(f"Zaznaczono: {t_name}")
+            if st.button(f"🗑️ POTWIERDŹ USUNIĘCIE PUNKTU"):
                 st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
-                st.session_state.update({'optimized_list': [], 'geometries': []})
-                st.rerun()
+                st.session_state.update({'optimized_list': [], 'geometries': []}); st.rerun()
 
-    # STATYSTYKI
+    # --- WYNIKI I TABELE (PRZYWRÓCONE) ---
     if visible_geoms:
-        st.markdown("### 📊 Podsumowanie tras")
-        cur_d, cur_t = sum(g['dist'] for g in visible_geoms), sum(g['time'] for g in visible_geoms)
-        st.markdown(f'<div class="stats-card route-sum">🌍 ŁĄCZNIE DLA WIDOCZNYCH: {cur_d/1000:.2f} km | {int(cur_t//3600)}h {int((cur_t%3600)//60)}min</div>', unsafe_allow_html=True)
+        st.markdown("### 📊 Szczegóły Tras")
+        cols = st.columns(min(len(visible_geoms), 4))
+        total_d, total_t = 0, 0
+        
+        for idx, g in enumerate(visible_geoms):
+            total_d += g['dist']; total_t += g['time']
+            with cols[idx % 4]:
+                st.markdown(f'''<div class="stats-card">
+                    <span style="color:{g["color"]}; font-size: 20px;">●</span> <b>{g["name"]}</b><br>
+                    📏 <b>{g["dist"]/1000:.2f} km</b><br>
+                    ⏱️ {int(g["time"]//3600)}h {int((g["time"]%3600)//60)}min<br>
+                    📍 Przystanków: {g["pts_count"]}
+                </div>''', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="stats-card route-sum">🌍 ŁĄCZNIE (WIDOCZNE): {total_d/1000:.2f} km | {int(total_t//3600)}h {int((total_t%3600)//60)}min</div>', unsafe_allow_html=True)
+
+        st.markdown("### 📋 Plan Przejazdu")
+        for i, opt_df in enumerate(st.session_state['optimized_list']):
+            # Sprawdzenie czy rejon tej tabeli jest obecnie widoczny (zaznaczony pigułką)
+            source = opt_df['source_file'].iloc[1] if len(opt_df) > 1 else "Baza"
+            if mode == "Jedna trasa" or source in v_files:
+                with st.expander(f"Kolejność: {source if mode != 'Jedna trasa' else 'Trasa Zbiorcza'}"):
+                    # Dodanie kolumny z numeracją przystanku
+                    table_df = opt_df[['display_name', 'source_file']].copy()
+                    table_df.index = table_df.index + 1
+                    st.table(table_df)
+
 else:
-    st.info("👈 Wgraj pliki KML oraz ustaw bazy w panelu bocznym.")
+    st.info("👈 Wgraj KML i wybierz bazy, aby rozpocząć.")
