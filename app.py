@@ -43,7 +43,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v93", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -86,7 +86,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v93_geo")
+        gl = Nominatim(user_agent="v94_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -127,7 +127,9 @@ with st.sidebar:
 
     with st.expander("🏠 Baza Lokalizacji", expanded=True):
         if st.session_state['saved_locations']:
-            sel_b = st.selectbox("Wybierz bazę:", ["---"] + list(st.session_state['saved_locations'].keys()))
+            # SORTOWANIE ALFABETYCZNE BAZY
+            sorted_locs = sorted(st.session_state['saved_locations'].keys())
+            sel_b = st.selectbox("Wybierz bazę:", ["---"] + sorted_locs)
             if sel_b != "---":
                 addr = st.session_state['saved_locations'][sel_b]
                 c1, c2, c3 = st.columns([1, 1, 1])
@@ -157,7 +159,9 @@ with st.sidebar:
             save_to_disk(); st.success("Zapisano!"); st.rerun()
         if st.session_state['projects']:
             st.markdown("---")
-            sel_p = st.selectbox("Wybierz projekt:", ["---"] + list(st.session_state['projects'].keys()))
+            # SORTOWANIE ALFABETYCZNE PROJEKTÓW
+            sorted_projs = sorted(st.session_state['projects'].keys())
+            sel_p = st.selectbox("Wybierz projekt:", ["---"] + sorted_projs)
             if sel_p != "---":
                 col_open, col_del = st.columns([3, 1])
                 with col_open:
@@ -172,7 +176,6 @@ with st.sidebar:
 # --- 5. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-# --- NAPRAWIONE POLA START/META Z PRZYCISKAMI CZYSZCZENIA ---
 c_start_box, c_meta_box = st.columns(2)
 with c_start_box:
     st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
@@ -203,7 +206,7 @@ if not st.session_state['data'].empty or sc:
 
     col_calc, col_clear = st.columns([3, 1])
     with col_calc:
-        if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
+        if st.button("OBLICZ TRASY", type="primary", use_container_width=True):
             if not (sc and mc): st.error("Ustaw Start i Metę!")
             else:
                 with st.spinner("Obliczanie..."):
