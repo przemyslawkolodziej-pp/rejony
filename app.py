@@ -10,7 +10,7 @@ import requests
 import hashlib
 import os
 
-# --- 1. FUNKCJE ZAPISU TRWAŁEGO (Autosave Projektów i Baz) ---
+# --- 1. FUNKCJE ZAPISU TRWAŁEGO (Autosave) ---
 STORAGE_FILE = "data_storage.json"
 
 def save_to_disk():
@@ -36,7 +36,7 @@ def load_from_disk():
                 }
         except: pass
 
-# --- 2. SYSTEM LOGOWANIA (Zapamiętywanie w sesji) ---
+# --- 2. SYSTEM LOGOWANIA ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
@@ -63,10 +63,10 @@ if 'start_name' not in st.session_state:
 
 if not check_password(): st.stop()
 
-# --- 3. ROZBUDOWANE FUNKCJE ROUTINGU (Dla tras 100+) ---
+# --- 3. FUNKCJE ROUTINGU I PARSERY (Chunking 100+) ---
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v51_geocoder")
+        gl = Nominatim(user_agent="v53_geocoder")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -75,7 +75,6 @@ def get_math_dist(lat1, lon1, lat2, lon2):
     return math.sqrt((lat1-lat2)**2 + (lon1-lon2)**2)
 
 def get_chunked_route_info(coords_list):
-    """Dzieli trasę na segmenty po 40 punktów, by uniknąć limitów serwera OSRM."""
     combined_geometry, total_dist, total_time = [], 0, 0
     chunk_size = 40
     for i in range(0, len(coords_list) - 1, chunk_size - 1):
@@ -109,7 +108,7 @@ def get_color_for_file(file_name):
 # --- 4. KONFIGURACJA UI ---
 st.set_page_config(page_title="Optymalizator Drogowy", page_icon="🗺️", layout="wide")
 st.markdown("""<style>
-    .centered-trash { display: flex; align-items: center; justify-content: center; height: 100%; padding-top: 10px; }
+    .centered-trash { display: flex; align-items: center; justify-content: center; height: 100%; padding-top: 5px; }
     .selection-info { font-size: 13px; color: #1e1e1e; background-color: #e8f0fe; padding: 12px; border-radius: 8px; border-left: 6px solid #4285f4; margin-bottom: 15px; }
     </style>""", unsafe_allow_html=True)
 
@@ -123,29 +122,37 @@ with st.sidebar:
         if up_kmls and st.button("Wczytaj wszystkie pliki"):
             all_pts = [parse_kml_robust(f.read().decode('utf-8'), f.name) for f in up_kmls]
             if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
-        if st.button("🗑️ Wyczyść aktualne dane"):
-            for k in ['data', 'optimized', 'geometry', 'dist', 'time', 'start_coords', 'meta_coords']:
-                if k in st.session_state: st.session_state[k] = pd.DataFrame() if 'data' in k else None
-            st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
-            st.rerun()
 
+    # --- POPRAWIONA SEKCJA TWOJE BAZY Z LISTĄ ROZWIJANĄ ---
     with st.expander("📍 Twoje Bazy", expanded=True):
         with st.form("add_base_form", clear_on_submit=True):
             n_n, n_a = st.text_input("Nazwa bazy:"), st.text_input("Adres bazy:")
             if st.form_submit_button("Dodaj bazę") and n_n and n_a:
                 st.session_state['saved_locations'][n_n] = n_a; save_to_disk(); st.rerun()
-        for n, a in st.session_state['saved_locations'].items():
-            st.markdown(f"**{n}**")
-            c1, c2, c3 = st.columns([1.5, 1.5, 0.6])
-            if c1.button("Ustaw Start", key=f"s_{n}", use_container_width=True):
-                st.session_state.update({'start_addr': a, 'start_name': n, 'start_coords': get_lat_lng(a)}); st.rerun()
-            if c2.button("Ustaw Metę", key=f"m_{n}", use_container_width=True):
-                st.session_state.update({'meta_addr': a, 'meta_name': n, 'meta_coords': get_lat_lng(a)}); st.rerun()
-            with c3:
-                st.markdown('<div class="centered-trash">', unsafe_allow_html=True)
-                if st.button("🗑️", key=f"d_{n}"): del st.session_state['saved_locations'][n]; save_to_disk(); st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-            st.divider()
+        
+        st.divider()
+        if st.session_state['saved_locations']:
+            selected_base_name = st.selectbox("Wybierz bazę z listy:", ["--- Wybierz ---"] + list(st.session_state['saved_locations'].keys()))
+            
+            if selected_base_name != "--- Wybierz ---":
+                addr = st.session_state['saved_locations'][selected_base_name]
+                st.info(f"Adres: {addr}")
+                
+                c1, c2, c3 = st.columns([1, 1, 0.5])
+                if c1.button("Ustaw Start", use_container_width=True):
+                    st.session_state.update({'start_addr': addr, 'start_name': selected_base_name, 'start_coords': get_lat_lng(addr)})
+                    st.rerun()
+                if c2.button("Ustaw Metę", use_container_width=True):
+                    st.session_state.update({'meta_addr': addr, 'meta_name': selected_base_name, 'meta_coords': get_lat_lng(addr)})
+                    st.rerun()
+                with c3:
+                    st.markdown('<div class="centered-trash">', unsafe_allow_html=True)
+                    if st.button("🗑️", help="Usuń bazę"):
+                        del st.session_state['saved_locations'][selected_base_name]
+                        save_to_disk(); st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.write("Brak zapisanych baz.")
 
     with st.expander("📁 Projekty"):
         p_name = st.text_input("Nazwa projektu:")
@@ -156,12 +163,8 @@ with st.sidebar:
             }
             save_to_disk(); st.toast("Projekt zapisany!")
         if st.session_state['projects']:
-            sel_p = st.selectbox("Wczytaj:", list(st.session_state['projects'].keys()))
+            sel_p = st.selectbox("Wczytaj projekt:", list(st.session_state['projects'].keys()))
             if st.button("Wczytaj"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
-
-    with st.expander("💾 Backup"):
-        export_data = {"saved_locations": st.session_state['saved_locations'], "projects": {k: {**v, "data": v["data"].to_dict()} for k, v in st.session_state['projects'].items()}}
-        st.download_button("📥 Pobierz Backup JSON", data=json.dumps(export_data), file_name="backup.json")
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}), use_container_width=True)
 
@@ -172,20 +175,30 @@ df = st.session_state['data']
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not df.empty or sc or mc:
-    if st.button("🚀 OBLICZ TRASĘ (DLA WIELU PUNKTÓW)", type="primary", use_container_width=True):
-        if not (sc and mc): st.error("⚠️ Wybierz Start i Metę w panelu bocznym!")
-        else:
-            with st.spinner(f"Optymalizacja {len(df)} punktów..."):
-                curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": f"START: {st.session_state['start_name']}", "source_file": "START"}
-                route, unvisited = [curr], df.to_dict('records')
-                while unvisited:
-                    nxt = min(unvisited, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
-                    route.append(nxt); curr = nxt; unvisited.remove(nxt)
-                route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": f"META: {st.session_state['meta_name']}", "source_file": "META"})
-                st.session_state['optimized'] = pd.DataFrame(route)
-                res = get_chunked_route_info([[r['lat'], r['lng']] for r in route])
-                st.session_state.update({'geometry': res['geometry'], 'dist': res['distance'], 'time': res['duration']})
-                st.rerun()
+    col_run, col_reset = st.columns([3, 1])
+    
+    with col_run:
+        if st.button("🚀 OBLICZ TRASĘ (DLA WIELU PUNKTÓW)", type="primary", use_container_width=True):
+            if not (sc and mc): st.error("⚠️ Wybierz Start i Metę w panelu bocznym!")
+            else:
+                with st.spinner(f"Optymalizacja {len(df)} punktów..."):
+                    curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": f"START: {st.session_state['start_name']}", "source_file": "START"}
+                    route, unvisited = [curr], df.to_dict('records')
+                    while unvisited:
+                        nxt = min(unvisited, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
+                        route.append(nxt); curr = nxt; unvisited.remove(nxt)
+                    route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": f"META: {st.session_state['meta_name']}", "source_file": "META"})
+                    st.session_state['optimized'] = pd.DataFrame(route)
+                    res = get_chunked_route_info([[r['lat'], r['lng']] for r in route])
+                    st.session_state.update({'geometry': res['geometry'], 'dist': res['distance'], 'time': res['duration']})
+                    st.rerun()
+
+    with col_reset:
+        if st.button("🔄 WYCZYŚĆ AKTUALNĄ TRASĘ", use_container_width=True):
+            for k in ['data', 'optimized', 'geometry', 'dist', 'time', 'start_coords', 'meta_coords']:
+                if k in st.session_state: st.session_state[k] = pd.DataFrame() if 'data' in k else None
+            st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano", 'start_addr': "", 'meta_addr': ""})
+            st.rerun()
 
     if 'dist' in st.session_state:
         m1, m2, m3 = st.columns(3)
@@ -196,7 +209,6 @@ if not df.empty or sc or mc:
     view_df = st.session_state.get('optimized', df)
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
     
-    # OFFSET DLA BAZ (Jeśli start=meta)
     disp_mc = mc.copy() if mc else None
     if sc and mc and sc['lat'] == mc['lat']: disp_mc['lat'] += 0.00015; disp_mc['lng'] += 0.00015
 
@@ -218,4 +230,4 @@ if not df.empty or sc or mc:
         table_df.index = range(1, len(table_df) + 1)
         st.dataframe(table_df, use_container_width=True)
 else:
-    st.info("👈 Wczytaj KML i ustaw bazy.")
+    st.info("👈 Wczytaj pliki KML i ustaw bazy z listy rozwijanej.")
