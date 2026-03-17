@@ -79,7 +79,8 @@ st.markdown("""
 
 # --- 3. LOGIKA POMOCNICZA ---
 def get_folium_color(idx):
-    colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
+    # Paleta standardowych kolorów Folium/Leaflet
+    colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen', 'pink', 'lightblue', 'lightgreen']
     return colors[idx % len(colors)]
 
 file_color_map = {}
@@ -89,7 +90,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v98_geo")
+        gl = Nominatim(user_agent="v99_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -123,7 +124,6 @@ def parse_kml(content, name):
 with st.sidebar:
     st.header("⚙️ Zarządzanie")
     
-    # SEKCJA UPLOADU Z CHMURKĄ
     with st.expander("☁️ Wgrywanie KML", expanded=False):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
@@ -215,17 +215,30 @@ if not st.session_state['data'].empty or sc:
                 with st.spinner("Obliczanie..."):
                     st.session_state.update({'optimized_list': [], 'geometries': []})
                     groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
+                    
                     for group in groups:
                         if group.empty: continue
+                        # Ustalenie koloru dla tej konkretnej trasy na podstawie pliku źródłowego
+                        source_name = group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość"
+                        route_color = file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa" else 'green'
+                        
                         curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
                         route, unv = [curr], group.to_dict('records')
                         while unv:
                             nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
                             route.append(nxt); curr = nxt; unv.remove(nxt)
                         route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
+                        
                         geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
-                        st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), "dist": d, "time": t, "pts_count": len(group), "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość", "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"})
+                        st.session_state['geometries'].append({
+                            "geom": geom, 
+                            "color": route_color, 
+                            "dist": d, "time": t, 
+                            "pts_count": len(group), 
+                            "name": source_name, 
+                            "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"
+                        })
                     st.rerun()
 
     with col_clear:
@@ -244,7 +257,11 @@ if not st.session_state['data'].empty or sc:
 
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-    for g in visible_geoms: folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+    
+    # Rysowanie linii trasy w przypisanym kolorze
+    for g in visible_geoms: 
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+        
     if show_pins:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
