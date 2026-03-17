@@ -225,4 +225,40 @@ if not df.empty or sc or mc:
     if st.button("🚀 OBLICZ OPTYMALNĄ TRASĘ (OSRM)", type="primary", use_container_width=True):
         if sc and mc:
             with st.spinner("Szukanie najkrótszej drogi..."):
-                curr = {"lat": sc['lat'], "
+                curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": f"START: {st.session_state['start_name']}", "source_file": "START"}
+                route = [curr]
+                unvisited = df.to_dict('records')
+                while unvisited:
+                    nxt = min(unvisited, key=lambda x: get_road_distance(curr['lat'], curr['lng'], x['lat'], x['lng'])[0])
+                    route.append(nxt); curr = nxt; unvisited.remove(nxt)
+                route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": f"META: {st.session_state['meta_name']}", "source_file": "META"})
+                st.session_state['optimized'] = pd.DataFrame(route)
+                f_i = get_full_route_info([[r['lat'], r['lng']] for r in route])
+                if f_i: st.session_state.update({'geometry': f_i['geometry'], 'dist': f_i['distance'], 'time': f_i['duration']})
+                st.rerun()
+
+    if 'dist' in st.session_state:
+        m1, m2 = st.columns(2)
+        m1.metric("Dystans", f"{st.session_state['dist']/1000:.2f} km")
+        m2.metric("Czas", f"{int(st.session_state['time']//3600)}h {int((st.session_state['time']%3600)//60)}min")
+
+    # MAPA
+    view_df = st.session_state.get('optimized', df)
+    m = folium.Map(location=[52.2, 19.2], zoom_start=6)
+    if sc: folium.Marker([sc['lat'], sc['lng']], tooltip="START", icon=folium.Icon(color='green', icon='play')).add_to(m)
+    if display_mc: folium.Marker([display_mc['lat'], display_mc['lng']], tooltip="META", icon=folium.Icon(color='red', icon='stop')).add_to(m)
+    for i, r in view_df.iterrows():
+        if r['source_file'] not in ["START", "META"]:
+            folium.Marker([r['lat'], r['lng']], tooltip=f"{r['display_name']} ({r['source_file']})",
+                          icon=folium.Icon(color=get_color_for_file(r['source_file']))).add_to(m)
+    if 'geometry' in st.session_state:
+        folium.PolyLine([[c[1], c[0]] for c in st.session_state['geometry']], color="#4285f4", weight=5).add_to(m)
+        m.fit_bounds([[sc['lat'], sc['lng']], [mc['lat'], mc['lng']]])
+    st_folium(m, width="100%", height=550, key=f"map_{len(view_df)}")
+
+    # TABELA
+    st.markdown("### 📋 Kolejność przystanków")
+    st.dataframe(view_df[['display_name', 'source_file']], use_container_width=True, 
+                 column_config={"display_name": "Etykieta", "source_file": "Źródło"})
+else:
+    st.info("👈 Wgraj KML i ustaw Start/Metę w panelu bocznym.")
