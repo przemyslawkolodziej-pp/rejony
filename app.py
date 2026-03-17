@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v78", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v80", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -55,11 +55,10 @@ st.markdown("""
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; color: inherit; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; margin-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    span[data-baseweb="tag"] { background-color: #4285f4 !important; color: white !important; border-radius: 20px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. LOGIKA ---
+# --- 3. LOGIKA POMOCNICZA ---
 def get_folium_color(idx):
     colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
     return colors[idx % len(colors)]
@@ -72,7 +71,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v78_geo")
+        gl = Nominatim(user_agent="v80_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -130,20 +129,6 @@ with st.sidebar:
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("Dodaj bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
-    with st.expander("📁 Projekty", expanded=False):
-        p_name = st.text_input("Nazwa projektu:")
-        if st.button("💾 Zapisz Projekt") and p_name:
-            st.session_state['projects'][p_name] = {
-                'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-                'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-                'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries'],
-                'total_dist': st.session_state['total_dist'], 'total_time': st.session_state['total_time']
-            }
-            save_to_disk(); st.toast("Zapisano!")
-        if st.session_state['projects']:
-            sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
-            if sel_p != "---" and st.button("Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
-
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
 # --- 5. PANEL GŁÓWNY ---
@@ -153,22 +138,26 @@ sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 filtered_df = st.session_state['data']
 
 if not st.session_state['data'].empty or sc:
-    # WYBÓR REJONÓW (PIGUŁKI)
-    if not st.session_state['data'].empty:
+    # FILTRY I STEROWANIE
+    col_filters, col_view = st.columns([2, 1])
+    with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-        v_files = st.multiselect("Zaznacz rejony do uwzględnienia:", u_files, default=u_files)
+        v_files = st.multiselect("Zaznacz rejony:", u_files, default=u_files)
         filtered_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_files)]
-
-    mode = st.radio("Tryb pracy:", ["Jedna trasa zbiorcza", "Oddzielne trasy dla plików"], horizontal=True)
     
+    with col_view:
+        st.write("👁️ Widoczność")
+        show_pins = st.checkbox("Pokaż pinezki punktów", value=True)
+        mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
+
     if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
-        if not (sc and mc): st.error("Wybierz Start i Metę w panelu Bazy!")
-        elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
+        if not (sc and mc): st.error("Ustaw Start i Metę!")
+        elif filtered_df.empty: st.warning("Zaznacz rejon!")
         else:
-            with st.spinner("Przeliczanie..."):
-                st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
-                groups = [filtered_df] if mode == "Jedna trasa zbiorcza" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
-                for i, group in enumerate(groups):
+            with st.spinner("Liczenie..."):
+                st.session_state.update({'optimized_list': [], 'geometries': []})
+                groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
+                for group in groups:
                     curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
                     route, unv = [curr], group.to_dict('records')
                     while unv:
@@ -179,58 +168,55 @@ if not st.session_state['data'].empty or sc:
                     st.session_state['optimized_list'].append(pd.DataFrame(route))
                     st.session_state['geometries'].append({
                         "geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), 
-                        "dist": d, "time": t, "pts_count": len(group), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"
+                        "dist": d, "time": t, "pts_count": len(group), 
+                        "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość",
+                        "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"
                     })
-                    st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                 st.rerun()
 
-    # MAPA
-    all_pts_coords = [[sc['lat'], sc['lng']]] if sc else []
-    if mc: all_pts_coords.append([mc['lat'], mc['lng']])
-    for _, r in filtered_df.iterrows(): all_pts_coords.append([r['lat'], r['lng']])
+    # FILTROWANIE TRAS NA MAPIE
+    visible_geoms = st.session_state['geometries']
+    if mode == "Oddzielne":
+        visible_geoms = [g for g in st.session_state['geometries'] if g.get('source_file') in v_files]
 
+    # MAPA
     m = folium.Map()
-    if all_pts_coords: m.fit_bounds(all_pts_coords)
-    else: m.location = [52.2, 19.2]; m.zoom_start = 6
+    all_coords = [[sc['lat'], sc['lng']]] if sc else []
+    if mc: all_coords.append([mc['lat'], mc['lng']])
+    for _, r in filtered_df.iterrows(): all_coords.append([r['lat'], r['lng']])
+    if all_coords: m.fit_bounds(all_coords)
 
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-    for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
-    for idx, r in filtered_df.iterrows():
-        color = file_color_map.get(r['source_file'], 'gray')
-        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v78")
+    # Rysowanie linii tras
+    for g in visible_geoms:
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+    
+    # Rysowanie pinezek (tylko jeśli włączone)
+    if show_pins:
+        for idx, r in filtered_df.iterrows():
+            folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
+    
+    map_data = st_folium(m, width="100%", height=550, key="map_v80")
 
-    # LOGIKA USUWANIA Z AUTOMATYCZNYM CZYSZCZENIEM TRASY
-    if map_data.get("last_object_clicked"):
-        clicked_lat, clicked_lng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
-        match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clicked_lat) < 0.0001) & (abs(st.session_state['data']['lng'] - clicked_lng) < 0.0001)]
-        
+    # USUWANIE (Działa nawet gdy pinezki są ukryte, jeśli klikniesz w "miejsce" punktu, ale lepiej usuwać przy włączonych)
+    if show_pins and map_data.get("last_object_clicked"):
+        clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
+        match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
         if not match.empty:
-            target_idx, target_name = match.index[0], match.iloc[0]['display_name']
-            st.warning(f"Wybrano punkt: **{target_name}**")
-            if st.button(f"🗑️ USUŃ I WYCZYŚĆ TRASĘ: {target_name}", type="primary"):
-                # 1. Usuwamy punkt z bazy danych
-                st.session_state['data'] = st.session_state['data'].drop(target_idx).reset_index(drop=True)
-                # 2. Czyścimy wyniki trasy (wymuszamy ponowne obliczenie)
-                st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
+            t_idx, t_name = match.index[0], match.iloc[0]['display_name']
+            st.warning(f"Wybrano: {t_name}")
+            if st.button(f"🗑️ USUŃ PUNKT I WYCZYŚĆ TRASĘ"):
+                st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
+                st.session_state.update({'optimized_list': [], 'geometries': []})
                 st.rerun()
 
-    # WYNIKI
-    if st.session_state['geometries']:
-        st.markdown("### 📊 Wyniki Trasy")
-        cols = st.columns(min(len(st.session_state['geometries']), 4))
-        for idx, g in enumerate(st.session_state['geometries']):
-            with cols[idx % 4]:
-                st.markdown(f'<div class="stats-card"><span style="color:{g["color"]}; font-size: 20px;">📍</span> <b>Trasa {idx+1}</b><br><small>{g.get("name")}</small><br><b>{g["dist"]/1000:.2f} km</b><br>{int(g["time"]//3600)}h {int((g["time"]%3600)//60)}min<br>Punkty: {g.get("pts_count")}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="stats-card route-sum">🌍 ŁĄCZNIE: {st.session_state["total_dist"]/1000:.2f} km | {int(st.session_state["total_time"]//3600)}h {int((st.session_state["total_time"]%3600)//60)}min</div>', unsafe_allow_html=True)
+    # STATYSTYKI
+    if visible_geoms:
+        st.markdown("### 📊 Statystyki")
+        cur_d, cur_t = sum(g['dist'] for g in visible_geoms), sum(g['time'] for g in visible_geoms)
+        st.markdown(f'<div class="stats-card route-sum">🌍 WIDOCZNE: {cur_d/1000:.2f} km | {int(cur_t//3600)}h {int((cur_t%3600)//60)}min</div>', unsafe_allow_html=True)
 
-    if st.session_state['optimized_list']:
-        st.markdown("### 📋 Szczegółowy Plan")
-        for i, opt_df in enumerate(st.session_state['optimized_list']):
-            with st.expander(f"Tabela przystanków - Trasa {i+1}"):
-                st.table(opt_df[['display_name', 'source_file']])
 else:
-    st.info("👈 Wgraj pliki KML w panelu bocznym, aby rozpocząć.")
+    st.info("👈 Wgraj KML, aby zacząć.")
