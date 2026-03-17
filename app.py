@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v71", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v72", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -47,12 +47,13 @@ if 'start_name' not in st.session_state: st.session_state.update({'start_name': 
 
 if not check_password(): st.stop()
 
-# --- 2. STYLE CSS ---
+# --- 2. STYLE CSS (POPRAWIONE DLA JASNEGO MOTYWU) ---
 st.markdown("""
 <style>
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
-    .stats-card { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #444; margin-bottom: 20px; }
-    .route-sum { font-weight: bold; font-size: 18px; color: #28a745; border-top: 1px solid #444; padding-top: 10px; margin-top: 10px; }
+    .selection-info { background-color: rgba(0,0,0,0.05); padding: 12px; border-radius: 8px; border-left: 5px solid #4285f4; margin-bottom: 15px; font-size: 14px; }
+    .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; color: inherit; }
+    .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; margin-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -70,7 +71,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v71_geo")
+        gl = Nominatim(user_agent="v72_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -104,6 +105,9 @@ def parse_kml(content, name):
 with st.sidebar:
     st.header("🗺️ Menu")
     with st.expander("🚀 Pliki i Widoczność", expanded=True):
+        # PRZYWRÓCONE INFO O START / META
+        st.markdown(f'<div class="selection-info">🏠 <b>Start:</b> {st.session_state["start_name"]}<br>🏁 <b>Meta:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+        
         up = st.file_uploader("Wgraj KML", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
@@ -133,16 +137,6 @@ with st.sidebar:
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("Dodaj bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
-    with st.expander("📁 Projekty"):
-        p_name = st.text_input("Nazwa projektu:")
-        if st.button("💾 Zapisz Projekt") and p_name:
-            st.session_state['projects'][p_name] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_list': st.session_state['optimized_list'], 'geometries': st.session_state['geometries'], 'total_dist': st.session_state['total_dist'], 'total_time': st.session_state['total_time']}
-            save_to_disk(); st.toast("Zapisano!")
-        if st.session_state['projects']:
-            sel_p = st.selectbox("Wczytaj:", ["---"] + list(st.session_state['projects'].keys()))
-            if sel_p != "---":
-                if st.button("Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
-
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
 # --- 5. PANEL GŁÓWNY ---
@@ -167,21 +161,21 @@ if not filtered_df.empty or sc:
                     route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
                     geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                     st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa zbiorcza" else 'blue', "dist": d, "time": t, "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
+                    st.session_state['geometries'].append({
+                        "geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa zbiorcza" else 'blue', 
+                        "dist": d, "time": t, "pts_count": len(group), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"
+                    })
                     st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                 st.rerun()
 
-    # --- MAPA Z DOPASOWANIEM WIDOKU ---
-    all_points = []
-    if sc: all_points.append([sc['lat'], sc['lng']])
-    if mc: all_points.append([mc['lat'], mc['lng']])
-    for _, r in filtered_df.iterrows(): all_points.append([r['lat'], r['lng']])
+    # MAPA
+    all_pts_coords = [[sc['lat'], sc['lng']]] if sc else []
+    if mc: all_pts_coords.append([mc['lat'], mc['lng']])
+    for _, r in filtered_df.iterrows(): all_pts_coords.append([r['lat'], r['lng']])
 
-    m = folium.Map() # Brak stałego zoom/location - będzie ustawiony dynamicznie
-    if all_points:
-        m.fit_bounds(all_points) # DOPASOWANIE WIDOKU DO WSZYSTKICH PUNKTÓW
-    else:
-        m.location = [52.2, 19.2]; m.zoom_start = 6
+    m = folium.Map()
+    if all_pts_coords: m.fit_bounds(all_pts_coords)
+    else: m.location = [52.2, 19.2]; m.zoom_start = 6
 
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
@@ -191,9 +185,9 @@ if not filtered_df.empty or sc:
         color = file_color_map.get(r['source_file'], 'gray')
         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=color, icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v71")
+    st_folium(m, width="100%", height=550, key="map_v72")
 
-    # --- SEKCJA WYNIKÓW ---
+    # --- POPRAWIONA SEKCJA WYNIKÓW ---
     if st.session_state['geometries']:
         st.markdown("### 📊 Wyniki Trasy")
         cols = st.columns(min(len(st.session_state['geometries']), 4))
@@ -203,8 +197,9 @@ if not filtered_df.empty or sc:
                 <div class="stats-card">
                     <span style="color:{g['color']}; font-size: 20px;">📍</span> <b>Trasa {idx+1}</b><br>
                     <small>{g['name']}</small><br>
-                    <b>{g['dist']/1000:.2f} km</b><br>
-                    {int(g['time']//3600)}h {int((g['time']%3600)//60)}min
+                    <b>Dystans: {g['dist']/1000:.2f} km</b><br>
+                    Czas: {int(g['time']//3600)}h {int((g['time']%3600)//60)}min<br>
+                    Punkty: {g['pts_count']}
                 </div>
                 """, unsafe_allow_html=True)
         
@@ -220,5 +215,3 @@ if not filtered_df.empty or sc:
         for i, opt_df in enumerate(st.session_state['optimized_list']):
             with st.expander(f"Tabela przystanków - Trasa {i+1}", expanded=False):
                 st.table(opt_df[['display_name', 'source_file']])
-else:
-    st.info("👈 Wczytaj KML i wybierz bazy.")
