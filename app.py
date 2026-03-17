@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v68", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v69", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -56,10 +56,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. LOGIKA ---
+# --- 3. LOGIKA KOLORÓW ---
+def get_folium_color(idx):
+    colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
+    return colors[idx % len(colors)]
+
+# Tworzymy mapę kolorów dla plików obecnych w sesji
+file_color_map = {}
+if not st.session_state['data'].empty:
+    unique_files = sorted(st.session_state['data']['source_file'].unique().tolist())
+    for i, f in enumerate(unique_files):
+        file_color_map[f] = get_folium_color(i)
+
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v68_geo")
+        gl = Nominatim(user_agent="v69_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -88,11 +99,6 @@ def parse_kml(content, name):
         c = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
         if c: pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": name})
     return pd.DataFrame(pts)
-
-# Kolory akceptowane przez Folium Icon
-def get_folium_color(idx):
-    colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen']
-    return colors[idx % len(colors)]
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
@@ -162,7 +168,7 @@ if not filtered_df.empty or sc:
                     route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
                     geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                     st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({"geom": geom, "color": get_folium_color(i), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
+                    st.session_state['geometries'].append({"geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa zbiorcza" else 'blue', "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
                     st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                 st.rerun()
 
@@ -171,20 +177,19 @@ if not filtered_df.empty or sc:
     if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
     if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
     
-    if st.session_state['optimized_list']:
-        for i, opt_df in enumerate(st.session_state['optimized_list']):
-            color = st.session_state['geometries'][i]['color']
-            folium.PolyLine([[c[1], c[0]] for c in st.session_state['geometries'][i]['geom']], color=color, weight=5, opacity=0.7).add_to(m)
-            for _, r in opt_df.iterrows():
-                if r['source_file'] != "Baza":
-                    folium.Marker([r['lat'], r['lng']], 
-                                  icon=folium.Icon(color=color, icon='circle', prefix='fa'), 
-                                  tooltip=r['display_name']).add_to(m)
-    else:
-        for _, r in filtered_df.iterrows():
-            folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color='gray', icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
+    # Rysowanie tras
+    for g in st.session_state['geometries']:
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
     
-    st_folium(m, width="100%", height=550, key="map_v68")
+    # Rysowanie pinezek - Kluczowa poprawka kolorów
+    for _, r in filtered_df.iterrows():
+        # Kolor brany bezpośrednio z mapy plików, niezależnie od obliczeń
+        color = file_color_map.get(r['source_file'], 'gray')
+        folium.Marker([r['lat'], r['lng']], 
+                      icon=folium.Icon(color=color, icon='circle', prefix='fa'), 
+                      tooltip=f"{r['display_name']} ({r['source_file']})").add_to(m)
+    
+    st_folium(m, width="100%", height=550, key="map_v69")
 
     if st.session_state['optimized_list']:
         st.markdown("### 📋 Plan Przejazdu")
