@@ -5,16 +5,29 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import re, math, json, requests, os
 
-# --- 1. ZAPIS I LOGOWANIE ---
+# --- 1. ZAPIS I LOGOWANIE (NAPRAWIONY EKSPORT JSON) ---
 STORAGE_FILE = "data_storage.json"
 
 def save_to_disk():
-    data = {
-        "saved_locations": st.session_state['saved_locations'], 
-        "projects": {k: {**v, "data": v["data"].to_dict()} for k, v in st.session_state['projects'].items()}
-    }
-    with open(STORAGE_FILE, "w", encoding="utf-8") as f: 
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    # Pomocnicza funkcja do konwersji DataFrame i innych typów na format JSON
+    def serialize_project(obj):
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_dict()
+        if isinstance(obj, dict):
+            return {k: serialize_project(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [serialize_project(i) for i in obj]
+        return obj
+
+    try:
+        data = {
+            "saved_locations": st.session_state['saved_locations'], 
+            "projects": {k: serialize_project(v) for k, v in st.session_state['projects'].items()}
+        }
+        with open(STORAGE_FILE, "w", encoding="utf-8") as f: 
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"Błąd zapisu: {e}")
 
 def load_from_disk():
     if os.path.exists(STORAGE_FILE):
@@ -22,16 +35,24 @@ def load_from_disk():
             with open(STORAGE_FILE, "r", encoding="utf-8") as f:
                 s = json.load(f)
                 st.session_state['saved_locations'] = s.get("saved_locations", {})
-                st.session_state['projects'] = {
-                    k: {**v, "data": pd.DataFrame(v["data"])} for k, v in s.get("projects", {}).items()
-                }
+                raw_projects = s.get("projects", {})
+                
+                # Przywracanie DataFrame z słowników
+                loaded_projects = {}
+                for k, v in raw_projects.items():
+                    proj = v.copy()
+                    if 'data' in proj: proj['data'] = pd.DataFrame(proj['data'])
+                    if 'optimized_list' in proj:
+                        proj['optimized_list'] = [pd.DataFrame(df) for df in proj['optimized_list']]
+                    loaded_projects[k] = proj
+                st.session_state['projects'] = loaded_projects
         except: pass
 
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v86", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v87", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -73,7 +94,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v86_geo")
+        gl = Nominatim(user_agent="v87_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -135,13 +156,17 @@ with st.sidebar:
             if st.form_submit_button("➕ Dodaj"):
                 if n and a: st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
 
-    with st.expander("📁 Projekty", expanded=False):
+    with st.expander("📁 Projekty", expanded=True):
         p_name = st.text_input("Zapisz projekt jako:")
         if st.button("💾 Zapisz") and p_name:
             st.session_state['projects'][p_name] = {
-                'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-                'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-                'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
+                'data': st.session_state['data'].copy(), 
+                'start_name': st.session_state['start_name'], 
+                'meta_name': st.session_state['meta_name'],
+                'start_coords': st.session_state['start_coords'], 
+                'meta_coords': st.session_state['meta_coords'],
+                'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 
+                'geometries': st.session_state['geometries']
             }
             save_to_disk(); st.success("Zapisano!")
         if st.session_state['projects']:
@@ -198,7 +223,7 @@ if not st.session_state['data'].empty or sc:
                         })
                     st.rerun()
     with col_clear:
-        if st.button("🗑️ WYCZYŚĆ", use_container_width=True):
+        if st.button("🗑️ CZYŚĆ", key="main_clear_btn", use_container_width=True):
             st.session_state.update({'optimized_list': [], 'geometries': []}); st.rerun()
 
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
@@ -216,7 +241,7 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v86")
+    map_data = st_folium(m, width="100%", height=550, key="map_v87")
 
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
@@ -244,4 +269,4 @@ if not st.session_state['data'].empty or sc:
                 with st.expander(f"📋 Tabela: {source if mode != 'Jedna trasa' else 'Trasa Zbiorcza'}"):
                     st.table(opt_df[['display_name', 'source_file']].reset_index(drop=True))
 else:
-    st.info("👈 Wgraj KML i wybierz bazy.")
+    st.info("👈 Wgraj KML i ustaw bazy.")
