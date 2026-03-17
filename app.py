@@ -43,7 +43,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v92", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v93", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -70,6 +70,7 @@ st.markdown("""
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 3px solid #28a745; padding-top: 10px; margin-top: 20px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
+    .small-clear-btn button { height: 30px !important; font-size: 14px !important; padding: 0px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -85,7 +86,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v92_geo")
+        gl = Nominatim(user_agent="v93_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -171,9 +172,21 @@ with st.sidebar:
 # --- 5. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-c_start, c_meta = st.columns(2)
-with c_start: st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
-with c_meta: st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+# --- NAPRAWIONE POLA START/META Z PRZYCISKAMI CZYSZCZENIA ---
+c_start_box, c_meta_box = st.columns(2)
+with c_start_box:
+    st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state['start_name'] != "Nie wybrano":
+        if st.button("✖", key="clear_start", help="Wyczyść Start"):
+            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None, 'geometries': [], 'optimized_list': []})
+            st.rerun()
+
+with c_meta_box:
+    st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state['meta_name'] != "Nie wybrano":
+        if st.button("✖", key="clear_meta", help="Wyczyść Metę"):
+            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None, 'geometries': [], 'optimized_list': []})
+            st.rerun()
 
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
@@ -230,9 +243,9 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    # --- PRZYWRÓCONA LOGIKA USUWANIA PINEZEK ---
     map_data = st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
 
+    # --- USUWANIE PINEZEK ---
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
         match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
@@ -241,7 +254,6 @@ if not st.session_state['data'].empty or sc:
             st.warning(f"Zaznaczono punkt: {t_name}")
             if st.button(f"🗑️ USUŃ TEN PUNKT"):
                 st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
-                # Czyścimy geometrię, by wymusić przeliczenie nowej trasy
                 st.session_state.update({'optimized_list': [], 'geometries': []})
                 st.rerun()
 
