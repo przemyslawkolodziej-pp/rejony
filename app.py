@@ -29,7 +29,7 @@ def load_from_disk():
 if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v63", page_icon="🗺️", layout="wide")
+    st.set_page_config(page_title="Optymalizator v64", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -47,19 +47,10 @@ if 'start_name' not in st.session_state: st.session_state.update({'start_name': 
 
 if not check_password(): st.stop()
 
-# --- 2. STYLE CSS (TRYB JASNY/CIEMNY) ---
-st.markdown("""
-<style>
-    div.stButton > button { height: 50px; width: 100%; font-size: 20px !important; border-radius: 10px; }
-    .selection-info { background-color: rgba(66, 133, 244, 0.1); padding: 12px; border-radius: 8px; border-left: 5px solid #4285f4; margin-bottom: 15px; font-size: 14px; }
-    button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- 3. LOGIKA ---
+# --- 2. LOGIKA ---
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v63_geo")
+        gl = Nominatim(user_agent="v64_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -90,22 +81,25 @@ def parse_kml(content, name):
         if c: pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": name})
     return pd.DataFrame(pts)
 
-def get_color(idx):
-    colors = ['#4285f4', '#ea4335', '#fbbc05', '#34a853', '#ff6d00', '#4615b2', '#00bcd4']
+def get_color_str(idx):
+    # Kolory Folium: 'blue', 'red', 'green', 'orange', 'purple', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue', 'lightgreen', 'gray', 'black', 'lightgray'
+    colors = ['blue', 'red', 'orange', 'purple', 'cadetblue', 'darkgreen', 'darkred']
     return colors[idx % len(colors)]
 
-# --- 4. SIDEBAR ---
+def get_hex_color(idx):
+    hex_colors = ['#2A75BB', '#D33D2A', '#F69730', '#D051B8', '#42697F', '#728224', '#A13336']
+    return hex_colors[idx % len(hex_colors)]
+
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("🗺️ Menu")
-    
     with st.expander("🚀 Pliki i Widoczność", expanded=True):
-        st.markdown(f'<div class="selection-info">🏠 Start: {st.session_state["start_name"]}<br>🏁 Meta: {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
         up = st.file_uploader("Wgraj KML", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj nowe pliki"):
             all_pts = [parse_kml(f.read().decode('utf-8'), f.name) for f in up]
             if all_pts: st.session_state['data'] = pd.concat(all_pts, ignore_index=True); st.rerun()
         
-        filtered_df = st.session_state['data'] # Domyślnie wszystkie
+        filtered_df = st.session_state['data']
         if not st.session_state['data'].empty:
             st.divider()
             u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -123,7 +117,6 @@ with st.sidebar:
                 if c2.button("🏁", key="b_m", type="primary" if st.session_state['meta_name']==sel_b else "secondary"):
                     st.session_state.update({'meta_name': sel_b, 'meta_coords': get_lat_lng(addr)}); st.rerun()
                 if c3.button("🗑️"): del st.session_state['saved_locations'][sel_b]; save_to_disk(); st.rerun()
-        st.divider()
         with st.form("new_b", clear_on_submit=True):
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("Dodaj bazę"): st.session_state['saved_locations'][n] = a; save_to_disk(); st.rerun()
@@ -136,27 +129,21 @@ with st.sidebar:
         if st.session_state['projects']:
             sel_p = st.selectbox("Wczytaj projekt:", ["---"] + list(st.session_state['projects'].keys()))
             if sel_p != "---":
-                cl, cd = st.columns([2, 1])
-                if cl.button("Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
-                if cd.button("🗑️"): del st.session_state['projects'][sel_p]; save_to_disk(); st.rerun()
+                if st.button("Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
-# --- 5. PANEL GŁÓWNY ---
+# --- 4. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator")
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
-# Sprawdzenie czy mamy jakiekolwiek punkty do pokazania (nawet przed obliczeniami)
-points_to_show = filtered_df if not filtered_df.empty else st.session_state['data']
-
-if not points_to_show.empty or sc:
+if not filtered_df.empty or sc:
     mode = st.radio("Tryb pracy:", ["Jedna trasa zbiorcza", "Oddzielne trasy dla plików"], horizontal=True)
     
     col_r, col_c = st.columns([3, 1])
     with col_r:
         if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
             if not (sc and mc): st.error("Wybierz Start i Metę!")
-            elif filtered_df.empty: st.warning("Zaznacz rejony w panelu bocznym!")
             else:
                 with st.spinner("Przeliczanie..."):
                     st.session_state.update({'optimized_list': [], 'geometries': [], 'total_dist': 0, 'total_time': 0})
@@ -170,7 +157,7 @@ if not points_to_show.empty or sc:
                         route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
                         geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                         st.session_state['optimized_list'].append(pd.DataFrame(route))
-                        st.session_state['geometries'].append({"geom": geom, "color": get_color(i), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
+                        st.session_state['geometries'].append({"geom": geom, "color": get_hex_color(i), "color_name": get_color_str(i), "name": group['source_file'].iloc[0] if mode != "Jedna trasa zbiorcza" else "Całość"})
                         st.session_state['total_dist'] += d; st.session_state['total_time'] += t
                     st.rerun()
     with col_c:
@@ -179,30 +166,41 @@ if not points_to_show.empty or sc:
                 st.session_state[k] = pd.DataFrame() if 'data' in k else ([] if k in ['optimized_list', 'geometries'] else None)
             st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"}); st.rerun()
 
+    # Statystyki
     if st.session_state['total_dist']:
         m1, m2, m3 = st.columns(3)
         m1.metric("Dystans", f"{st.session_state['total_dist']/1000:.2f} km")
         m2.metric("Czas", f"{int(st.session_state['total_time']//3600)}h {int((st.session_state['total_time']%3600)//60)}min")
         m3.metric("Liczba Tras", len(st.session_state['optimized_list']))
 
-    # Mapa - Poprawka: Wyświetla punkty nawet przed kliknięciem "Oblicz"
+    # MAPA
     m = folium.Map(location=[52.2, 19.2], zoom_start=6)
-    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home'), tooltip="START").add_to(m)
-    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag'), tooltip="META").add_to(m)
+    if sc: folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
+    if mc: folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
     
-    # Rysowanie linii tras (jeśli są obliczone)
+    # Linie tras
     for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.7).add_to(m)
     
-    # Rysowanie punktów
-    # Jeśli trasa jest obliczona, bierzemy z niej, jeśli nie - bierzemy surowe dane
-    source_df = pd.concat(st.session_state['optimized_list']) if st.session_state['optimized_list'] else points_to_show
-    for _, r in source_df.iterrows():
-        if r.get('source_file') != "Baza":
-            folium.CircleMarker([r['lat'], r['lng']], radius=6, color='black', fill=True, fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
+    # Pinezki punktów
+    if st.session_state['optimized_list']:
+        for i, opt_df in enumerate(st.session_state['optimized_list']):
+            c_name = st.session_state['geometries'][i]['color_name']
+            for _, r in opt_df.iterrows():
+                if r['source_file'] != "Baza":
+                    folium.Marker([r['lat'], r['lng']], 
+                                  icon=folium.Icon(color=c_name, icon='circle', prefix='fa'), 
+                                  tooltip=r['display_name']).add_to(m)
+    else:
+        # Jeśli jeszcze nie obliczono - szare pinezki
+        for _, r in filtered_df.iterrows():
+            folium.Marker([r['lat'], r['lng']], 
+                          icon=folium.Icon(color='gray', icon='circle', prefix='fa'), 
+                          tooltip=r['display_name']).add_to(m)
     
-    st_folium(m, width="100%", height=550, key=f"map_{len(points_to_show)}_{len(st.session_state['geometries'])}")
+    st_folium(m, width="100%", height=550, key="map_v64")
 
+    # Tabele
     if st.session_state['optimized_list']:
         st.markdown("### 📋 Plan Przejazdu")
         for i, opt_df in enumerate(st.session_state['optimized_list']):
@@ -210,4 +208,4 @@ if not points_to_show.empty or sc:
             with st.expander(f"Trasa {i+1} - {' '.join(rej)}", expanded=True):
                 st.table(opt_df[['display_name', 'source_file']])
 else:
-    st.info("👈 Wgraj KML i wybierz bazy w panelu bocznym.")
+    st.info("👈 Wgraj KML i wybierz bazy.")
