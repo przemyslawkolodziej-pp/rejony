@@ -5,7 +5,7 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import re, math, json, requests, os
 
-# --- 1. ZAPIS I LOGOWANIE (PRZYWRÓCONE) ---
+# --- 1. ZAPIS I LOGOWANIE ---
 STORAGE_FILE = "data_storage.json"
 
 def save_to_disk():
@@ -31,7 +31,7 @@ if 'authenticated' not in st.session_state: st.session_state['authenticated'] = 
 
 def check_password():
     if st.session_state['authenticated']: return True
-    st.set_page_config(page_title="Optymalizator v81", page_icon="📍", layout="wide")
+    st.set_page_config(page_title="Optymalizator v82", page_icon="📍", layout="wide")
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
@@ -53,10 +53,11 @@ if not check_password(): st.stop()
 st.markdown("""
 <style>
     div.stButton > button { height: 50px; width: 100%; font-size: 16px !important; border-radius: 10px; }
-    .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; }
+    .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; font-size: 15px; }
     .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
     .route-sum { font-weight: bold; font-size: 18px; border-top: 2px solid #28a745; padding-top: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
+    .stCheckbox { margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,7 +74,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v81_geo")
+        gl = Nominatim(user_agent="v82_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -149,7 +150,7 @@ with st.sidebar:
 # --- 5. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-# --- NOWOŚĆ: PANEL START/META NAD MAPĄ ---
+# PANEL START/META NAD MAPĄ
 c_start, c_meta = st.columns(2)
 with c_start:
     st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
@@ -159,7 +160,7 @@ with c_meta:
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty or sc:
-    # FILTRY
+    # FILTRY I WIDOK
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -170,34 +171,39 @@ if not st.session_state['data'].empty or sc:
         show_pins = st.checkbox("Pokaż pinezki punktów", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
-        if not (sc and mc): st.error("Najpierw wybierz Start i Metę w panelu bocznym!")
-        elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
-        else:
-            with st.spinner("Optymalizacja w toku..."):
-                st.session_state.update({'optimized_list': [], 'geometries': []})
-                groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
-                for group in groups:
-                    curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
-                    route, unv = [curr], group.to_dict('records')
-                    while unv:
-                        nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
-                        route.append(nxt); curr = nxt; unv.remove(nxt)
-                    route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
-                    geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
-                    st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({
-                        "geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), 
-                        "dist": d, "time": t, "pts_count": len(group), 
-                        "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość",
-                        "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"
-                    })
-                st.rerun()
+    # PRZYCISKI AKCJI
+    col_calc, col_clear = st.columns([3, 1])
+    with col_calc:
+        if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
+            if not (sc and mc): st.error("Najpierw wybierz Start i Metę w panelu bocznym!")
+            elif filtered_df.empty: st.warning("Zaznacz przynajmniej jeden rejon!")
+            else:
+                with st.spinner("Optymalizacja..."):
+                    st.session_state.update({'optimized_list': [], 'geometries': []})
+                    groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
+                    for group in groups:
+                        curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START", "source_file": "Baza"}
+                        route, unv = [curr], group.to_dict('records')
+                        while unv:
+                            nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
+                            route.append(nxt); curr = nxt; unv.remove(nxt)
+                        route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META", "source_file": "Baza"})
+                        geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
+                        st.session_state['optimized_list'].append(pd.DataFrame(route))
+                        st.session_state['geometries'].append({
+                            "geom": geom, "color": file_color_map.get(group['source_file'].iloc[0], 'blue'), 
+                            "dist": d, "time": t, "pts_count": len(group), 
+                            "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość",
+                            "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"
+                        })
+                    st.rerun()
+    with col_clear:
+        if st.button("🗑️ WYCZYŚĆ TRASY", use_container_width=True):
+            st.session_state.update({'optimized_list': [], 'geometries': []})
+            st.rerun()
 
     # FILTROWANIE WIDOKU
-    visible_geoms = st.session_state['geometries']
-    if mode == "Oddzielne":
-        visible_geoms = [g for g in st.session_state['geometries'] if g.get('source_file') in v_files]
+    visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
 
     # MAPA
     m = folium.Map()
@@ -216,16 +222,16 @@ if not st.session_state['data'].empty or sc:
         for idx, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=550, key="map_v81")
+    map_data = st_folium(m, width="100%", height=550, key="map_v82")
 
-    # USUWANIE
+    # USUWANIE PUNKTU
     if show_pins and map_data.get("last_object_clicked"):
         clat, clng = map_data["last_object_clicked"]["lat"], map_data["last_object_clicked"]["lng"]
         match = st.session_state['data'][(abs(st.session_state['data']['lat'] - clat) < 0.0001) & (abs(st.session_state['data']['lng'] - clng) < 0.0001)]
         if not match.empty:
             t_idx, t_name = match.index[0], match.iloc[0]['display_name']
             st.warning(f"Kliknięto punkt: {t_name}")
-            if st.button(f"🗑️ USUŃ PUNKT: {t_name}"):
+            if st.button(f"🗑️ POTWIERDŹ USUNIĘCIE PUNKTU: {t_name}"):
                 st.session_state['data'] = st.session_state['data'].drop(t_idx).reset_index(drop=True)
                 st.session_state.update({'optimized_list': [], 'geometries': []})
                 st.rerun()
