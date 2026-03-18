@@ -11,36 +11,36 @@ from oauth2client.service_account import ServiceAccountCredentials
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
-# Lista dostępnych kolorów dla rejonów
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# Custom CSS - Agresywne wymuszenie kolorów z załącznika
+# Custom CSS - Wymuszenie kolorów na Multiselect, Checkbox i Radio
 st.markdown(f"""
     <style>
         .stButton>button {{ border-radius: 8px; }}
         
-        /* Przycisk Primary (Optymalizacja) */
+        /* 1. Przycisk Primary (Optymalizacja) */
         div.stButton > button[kind="primary"] {{
             background-color: #007bff !important;
             border-color: #007bff !important;
         }}
 
-        /* Kolor "pigułek" w multiselekcie (Wybrane rejony) */
+        /* 2. Multiselect - Pigułki (Tagi) */
         span[data-baseweb="tag"] {{
             background-color: #007bff !important;
             color: white !important;
         }}
         
-        /* Kolor kropek/wyboru w Radio Buttons */
-        div[role="radiogroup"] label[data-baseweb="radio"] div[size] {{
+        /* 3. Checkbox (Pokaż pinezki) - kolor po zaznaczeniu */
+        div[data-testid="stCheckbox"] input[checked] + div {{
             background-color: #007bff !important;
         }}
         
-        /* Obramowanie aktywnych pol wyboru */
-        div[data-baseweb="select"] > div {{
-            border-color: #007bff !important;
+        /* 4. Radio Buttons - kropka wyboru */
+        div[role="radiogroup"] div[data-baseweb="radio"] div[size] {{
+            background-color: #007bff !important;
         }}
-
+        
+        /* Karty podsumowania */
         .metric-card {{
             background-color: #f8f9fa;
             padding: 15px;
@@ -55,7 +55,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FUNKCJE POMOCNICZE ---
+# --- 2. FUNKCJE POMOCNICZE (BEZ ZMIAN) ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -78,12 +78,10 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        # Bazy
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_rows = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
         l_sh.update(values=l_rows, range_name='A1')
-        # Projekty
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
@@ -206,7 +204,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v188_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v189_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -235,9 +233,11 @@ if not st.session_state['data'].empty:
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
+    # LOGIKA PRZYCISKU (Wyszarzony + Sugestia treści)
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
+    btn_label = "OBLICZ OPTYMALNE TRASY" if not not_ready else "WYBIERZ START I METĘ, ABY OBLICZYĆ"
     
-    if st.button("OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True, disabled=not_ready):
+    if st.button(btn_label, type="primary", use_container_width=True, disabled=not_ready):
         with st.spinner("Optymalizacja..."):
             st.session_state.update({'optimized_list': [], 'geometries': []})
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
@@ -303,14 +303,11 @@ if not st.session_state['data'].empty:
     if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550)
 
-    # --- PODSUMOWANIE (Naprawiony Błąd KeyError) ---
     if st.session_state['geometries']:
         st.markdown("### 📊 Szczegóły rejonów")
         cols = st.columns(min(len(st.session_state['geometries']), 3))
         for idx, g in enumerate(st.session_state['geometries']):
-            # Zabezpieczenie przed brakiem klucza w starych projektach
             pts = g.get('pts_count', len(st.session_state['optimized_list'][idx]) - 2 if idx < len(st.session_state['optimized_list']) else "?")
-            
             with cols[idx % 3]:
                 st.markdown(f"""
                 <div class="metric-card" style="border-left-color: {g['color']};">
@@ -324,4 +321,4 @@ if not st.session_state['data'].empty:
                     if idx < len(st.session_state['optimized_list']):
                         st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
 else:
-    st.info("Wgraj KML i wybierz bazy (Start i Meta nie mogą być '---').")
+    st.info("Wgraj KML i wybierz bazy.")
