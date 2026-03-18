@@ -113,7 +113,6 @@ st.markdown("""
 <style>
     div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; }
     
-    /* Boxy informacyjne */
     .base-info-box { 
         background-color: #f0f2f6; 
         padding: 0 15px; 
@@ -126,15 +125,13 @@ st.markdown("""
         white-space: nowrap; 
         overflow: hidden; 
         text-overflow: ellipsis;
-        margin-bottom: 5px;
     }
 
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
     
-    /* Naprawa przycisku X - usuwamy domyślne marginesy Streamlita i centrujemy ikonę */
-    div.x-btn-container > div[data-testid="stVerticalBlock"] > div {
-        padding: 0px !important;
-        margin: 0px !important;
+    /* Naprawa przycisku X */
+    .x-btn-container {
+        margin-left: -15px; /* Przysunięcie przycisku do paska */
     }
 
     .x-btn-container button {
@@ -148,11 +145,21 @@ st.markdown("""
         padding: 0px !important;
         margin: 0px !important;
         line-height: 45px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
     }
 
     .x-btn-container button:hover {
         border-color: #ff4b4b !important;
         color: #ff4b4b !important;
+    }
+
+    /* Wyśrodkowanie ikony kosza w sidebarze */
+    div[data-testid="column"] button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -169,7 +176,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v117_geo")
+        gl = Nominatim(user_agent="v118_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -282,8 +289,7 @@ st.title("🗺️ Optymalizator Tras")
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    # Gap="none" redukuje domyślne przerwy między kolumnami
-    sub_c1, sub_c2 = st.columns([0.88, 0.12], gap="none")
+    sub_c1, sub_c2 = st.columns([0.85, 0.15], gap="small")
     sub_c1.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
         with sub_c2:
@@ -294,7 +300,7 @@ with col_main_1:
             st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main_2:
-    sub_c1, sub_c2 = st.columns([0.88, 0.12], gap="none")
+    sub_c1, sub_c2 = st.columns([0.85, 0.15], gap="small")
     sub_c1.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
         with sub_c2:
