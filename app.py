@@ -7,20 +7,36 @@ import re, math, json, requests, os, time, zlib, base64, hashlib
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. KONFIGURACJA I STYLIZACJA ---
+# --- 1. KONFIGURACJA ---
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
-st.markdown("""
-    <style>
-        .stButton>button { border-radius: 8px; }
-        .stMain { margin-top: -30px; }
-        /* Kolory nawigacji */
-        div[data-testid="stExpander"] { border: 1px solid #e9ecef; }
-    </style>
-""", unsafe_allow_html=True)
+# --- 2. FUNKCJE POMOCNICZE (FIX DLA KEYERROR) ---
+def get_col(df, possible_names, default="Brak"):
+    """Znajduje istniejącą kolumnę w DataFrame na podstawie listy możliwych nazw."""
+    for name in possible_names:
+        if name in df.columns:
+            return df[name]
+    return pd.Series([default] * len(df))
 
-# --- 2. LOGIKA AUTH ---
+def fix_dataframe_columns(df):
+    """Ujednolica nazwy kolumn w DataFrame, aby uniknąć KeyError."""
+    if df.empty: return df
+    mapping = {
+        'Punkt': ['Punkt', 'Nazwa', 'name', 'display_name', 'Nazwa Punktu'],
+        'Rejon': ['Rejon', 'source_file', 'Plik', 'Plik/Rejon']
+    }
+    for target, sources in mapping.items():
+        for s in sources:
+            if s in df.columns and s != target:
+                df = df.rename(columns={s: target})
+                break
+    # Jeśli nadal nie ma, stwórz puste
+    if 'Punkt' not in df.columns: df['Punkt'] = "Punkt"
+    if 'Rejon' not in df.columns: df['Rejon'] = "Nieokreślony"
+    return df
+
+# --- 3. LOGIKA AUTH ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -33,7 +49,7 @@ def check_auth():
             return True
     return False
 
-# --- 3. GOOGLE SHEETS ---
+# --- 4. GOOGLE SHEETS ---
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -52,12 +68,10 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        # Bazy
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_rows = [["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()]
         l_sh.update(values=l_rows, range_name='A1')
-        # Projekty
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
@@ -83,16 +97,9 @@ def sync_load():
             p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
             if p_n and p_j:
                 c = decompress_data(p_j)
-                if 'data' in c: 
-                    c['data'] = pd.DataFrame(c['data'])
-                    # NAPRAWA: Jeśli w starym projekcie była kolumna 'source_file', zmień na 'Rejon'
-                    if 'source_file' in c['data'].columns:
-                        c['data'] = c['data'].rename(columns={'source_file': 'Rejon'})
+                if 'data' in c: c['data'] = fix_dataframe_columns(pd.DataFrame(c['data']))
                 if 'optimized_list' in c: 
-                    c['optimized_list'] = [pd.DataFrame(df) for df in c['optimized_list']]
-                    for df in c['optimized_list']:
-                        if 'source_file' in df.columns:
-                            df.rename(columns={'source_file': 'Rejon'}, inplace=True)
+                    c['optimized_list'] = [fix_dataframe_columns(pd.DataFrame(df)) for df in c['optimized_list']]
                 loaded[p_n] = c
         st.session_state['projects'] = loaded
     except: pass
@@ -107,14 +114,14 @@ def save_logic(name):
     }
     sync_save()
 
-# --- 4. MODALE ---
+# --- 5. MODALE ---
 @st.dialog("Otwórz projekt")
 def modal_open_project():
     if not st.session_state['projects']:
         st.write("Brak projektów.")
         return
-    sel = st.selectbox("Wybierz:", sorted(st.session_state['projects'].keys()))
-    if st.button("Ok"):
+    sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
+    if st.button("Wczytaj"):
         st.session_state.update(st.session_state['projects'][sel])
         st.session_state['current_project_name'] = sel
         st.rerun()
@@ -123,14 +130,14 @@ def modal_open_project():
 def modal_save_as():
     n = st.text_input("Nazwa projektu:")
     if st.button("Zapisz"):
-        if n in st.session_state['projects']: st.warning("Nazwa zajęta!")
+        if n in st.session_state['projects']: st.warning("Ta nazwa już istnieje!")
         elif n:
             st.session_state['current_project_name'] = n
             save_logic(n); st.rerun()
 
 @st.dialog("Dodaj pliki KML")
 def modal_add_kml():
-    up = st.file_uploader("Wgraj KML", type=['kml'], accept_multiple_files=True)
+    up = st.file_uploader("Wgraj pliki KML", type=['kml'], accept_multiple_files=True)
     if st.button("Wczytaj") and up:
         all_pts = []
         for f in up:
@@ -141,13 +148,12 @@ def modal_add_kml():
                 coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
                 if coords: pts.append({
                     "Punkt": name.group(1) if name else "Punkt", 
-                    "lat": float(coords.group(2)), 
-                    "lng": float(coords.group(1)), 
+                    "lat": float(coords.group(2)), "lng": float(coords.group(1)), 
                     "Rejon": f.name
                 })
             all_pts.append(pd.DataFrame(pts))
         if all_pts:
-            new_data = pd.concat(all_pts)
+            new_data = fix_dataframe_columns(pd.concat(all_pts))
             st.session_state['data'] = pd.concat([st.session_state['data'], new_data], ignore_index=True).drop_duplicates()
             st.rerun()
 
@@ -155,19 +161,19 @@ def modal_add_kml():
 def modal_remove_kml():
     if st.session_state['data'].empty: return
     u_f = sorted(st.session_state['data']['Rejon'].unique())
-    to_del = st.multiselect("Wybierz pliki do usunięcia:", u_f)
-    if st.button("Usuń wybrane"):
+    to_del = st.multiselect("Wybierz rejon do usunięcia:", u_f)
+    if st.button("Usuń"):
         st.session_state['data'] = st.session_state['data'][~st.session_state['data']['Rejon'].isin(to_del)]
         st.rerun()
 
 @st.dialog("Dodaj bazę")
 def modal_add_base():
     n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-    if st.button("Dodaj") and n and a:
+    if st.button("Zapisz") and n and a:
         st.session_state['saved_locations'][n] = a
         sync_save(); st.rerun()
 
-# --- 5. INICJALIZACJA ---
+# --- 6. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
     st.session_state.update({
         'initialized': True, 'authenticated': False, 'data': pd.DataFrame(columns=["Punkt", "lat", "lng", "Rejon"]), 
@@ -187,7 +193,7 @@ if not check_auth():
                 sync_load(); st.rerun()
     st.stop()
 
-# --- 6. PASEK NAWIGACJI ---
+# --- 7. PASEK NAWIGACJI ---
 with st.container():
     c = st.columns([1, 1, 1.8, 1.2, 1.2, 1, 1])
     curr = st.session_state.get('current_project_name')
@@ -202,13 +208,13 @@ with st.container():
     if c[6].button("🔓 Wyloguj", use_container_width=True):
         st.query_params.clear(); st.session_state.clear(); st.rerun()
 
-if curr: st.info(f"Aktywny projekt: **{curr}**")
+if curr: st.info(f"Projekt: **{curr}**")
 st.markdown("---")
 
-# --- 7. START / META ---
+# --- 8. START / META ---
 def get_lat_lng(addr):
     try:
-        l = Nominatim(user_agent="v181_opti").geocode(addr, timeout=10)
+        l = Nominatim(user_agent="v182_opti").geocode(addr, timeout=10)
         return {"lat": l.latitude, "lng": l.longitude} if l else None
     except: return None
 
@@ -227,28 +233,25 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel])
         st.rerun()
 
-# --- 8. OBLICZENIA I MAPA ---
+# --- 9. OBLICZENIA I MAPA ---
 if not st.session_state['data'].empty:
-    # Zabezpieczenie przed brakiem kolumny Rejon w starych danych
-    if 'Rejon' not in st.session_state['data'].columns:
-        st.session_state['data']['Rejon'] = "Nieokreślony"
-
+    st.session_state['data'] = fix_dataframe_columns(st.session_state['data'])
     u_f = sorted(st.session_state['data']['Rejon'].unique())
-    v_f = st.multiselect("Filtruj rejony:", u_f, default=u_f)
+    v_f = st.multiselect("Widoczne rejony:", u_f, default=u_f)
     f_df = st.session_state['data'][st.session_state['data']['Rejon'].isin(v_f)]
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż punkty na mapie", value=True)
-    mode = cv2.radio("Sposób łączenia:", ["Wspólna trasa", "Osobne trasy dla rejonów"], horizontal=True)
+    mode = cv2.radio("Sposób trasy:", ["Jedna trasa", "Osobne trasy"], horizontal=True)
 
     if st.button("🚀 OBLICZ TRASY", type="primary", use_container_width=True):
         if not (st.session_state['start_coords'] and st.session_state['meta_coords']):
-            st.warning("Najpierw wybierz bazy startu i mety!")
+            st.warning("Ustaw Start i Metę!")
         else:
-            with st.spinner("Optymalizacja..."):
+            with st.spinner("Liczenie optymalnej drogi..."):
                 st.session_state.update({'optimized_list': [], 'geometries': []})
                 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-                grps = [f_df] if mode == "Wspólna trasa" else [f_df[f_df['Rejon']==f] for f in f_df['Rejon'].unique()]
+                grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['Rejon']==f] for f in f_df['Rejon'].unique()]
                 
                 for idx, g in enumerate(grps):
                     if g.empty: continue
@@ -270,47 +273,42 @@ if not st.session_state['data'].empty:
                                 dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
                         except: pass
                     
-                    st.session_state['optimized_list'].append(pd.DataFrame(route))
+                    st.session_state['optimized_list'].append(fix_dataframe_columns(pd.DataFrame(route)))
                     st.session_state['geometries'].append({
                         "geom": geom, "color": ['#007bff','#28a745','#6f42c1','#fd7e14','#20c997'][idx%5], 
                         "dist": dist, "time": dur, 
-                        "name": g['Rejon'].iloc[0] if mode != "Wspólna trasa" else "Całość", 
+                        "name": g['Rejon'].iloc[0] if mode != "Jedna trasa" else "Wszystkie", 
                         "pts": len(g)
                     })
                 st.rerun()
 
-    # --- MAPA ---
     m = folium.Map()
     if st.session_state['start_coords']: folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
     if st.session_state['meta_coords']: folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
     
     for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5).add_to(m)
     
     if show_pins:
         for _, r in f_df.iterrows():
-            folium.CircleMarker([r['lat'], r['lng']], radius=5, color='#007bff', fill=True, fill_opacity=0.7, tooltip=r['Punkt']).add_to(m)
+            folium.CircleMarker([r['lat'], r['lng']], radius=5, color='#007bff', fill=True, tooltip=r.get('Punkt', 'Punkt')).add_to(m)
     
-    st_folium(m, width="100%", height=550)
+    st_folium(m, width="100%", height=500)
 
-    # --- 9. WYNIKI ---
+    # --- 10. WYNIKI ---
     if st.session_state['geometries']:
-        st.markdown("### 📊 Wyniki i Tabele")
-        
-        # Statystyki w kolumnach
+        st.markdown("### 📊 Podsumowanie i Tabele")
         m_cols = st.columns(len(st.session_state['geometries']))
         for idx, g in enumerate(st.session_state['geometries']):
             with m_cols[idx]:
                 st.metric(g['name'], f"{g['dist']/1000:.2f} km", f"{int(g['time']//60)} min")
         
-        # Tabele tras
         for idx, df in enumerate(st.session_state['optimized_list']):
             name = st.session_state['geometries'][idx]['name']
-            with st.expander(f"📋 Szczegółowa trasa: {name}"):
-                res_df = df[['Punkt', 'Rejon']].reset_index()
-                res_df.columns = ['Kolejność', 'Nazwa Punktu', 'Plik/Rejon']
+            with st.expander(f"📋 Lista: {name}"):
+                res_df = df[['Punkt', 'Rejon']].copy().reset_index()
+                res_df.columns = ['Kolejność', 'Nazwa Punktu', 'Rejon']
                 st.dataframe(res_df, use_container_width=True, hide_index=True)
-                csv = res_df.to_csv(index=False).encode('utf-8')
-                st.download_button(f"Pobierz listę {name}", csv, f"trasa_{name}.csv", "text/csv")
+                st.download_button(f"Pobierz {name}", res_df.to_csv(index=False).encode('utf-8'), f"{name}.csv", "text/csv")
 else:
-    st.info("Dodaj pliki KML za pomocą przycisku na górze.")
+    st.info("Użyj paska na górze, by dodać dane.")
