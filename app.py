@@ -108,68 +108,25 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 4. STYLE CSS ---
+# --- 4. STYLE CSS (UPROSZCZONE) ---
 st.markdown("""
 <style>
-    /* Globalne style przycisków */
-    div.stButton > button { height: 40px; border-radius: 8px; }
+    div.stButton > button { height: 45px; width: 100%; border-radius: 10px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-
-    /* KONTENER DLA PASKA I PRZYCISKU */
-    .row-container {
-        position: relative;
-        display: flex;
-        align-items: center;
-        width: 100%;
-        height: 48px;
-        margin-bottom: 10px;
-    }
-
-    /* PASEK INFORMACYJNY */
+    
     .base-info-box { 
         background-color: #f0f2f6; 
-        padding: 0 55px 0 15px; /* Duży padding z prawej na przycisk */
+        padding: 0 15px; 
         border-radius: 10px; 
         border-left: 5px solid #28a745; 
         font-size: 14px; 
-        height: 48px; 
+        height: 45px; 
         display: flex; 
         align-items: center; 
-        width: 100%;
-        box-sizing: border-box;
         white-space: nowrap; 
         overflow: hidden; 
         text-overflow: ellipsis;
-    }
-
-    /* PRZYCISK X POZYCJONOWANY WEWNĄTRZ */
-    .x-overlay {
-        position: absolute;
-        right: 5px;
-        top: 50%;
-        transform: translateY(-50%);
-        z-index: 10;
-    }
-
-    .x-overlay button {
-        background-color: #ffffff !important;
-        color: #31333f !important;
-        border: 1px solid #dcdde1 !important;
-        width: 38px !important;
-        height: 38px !important;
-        min-width: 38px !important;
-        border-radius: 8px !important;
-        padding: 0px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-
-    .x-overlay button:hover {
-        border-color: #ff4b4b !important;
-        color: #ff4b4b !important;
-        background-color: #fff1f1 !important;
+        box-sizing: border-box;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -186,7 +143,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v121_geo")
+        gl = Nominatim(user_agent="v124_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -296,33 +253,29 @@ with st.sidebar:
 # --- 7. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
+# Używamy vertical_alignment="center" dla idealnego wyrównania paska z przyciskiem X
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    st.markdown('<div class="row-container">', unsafe_allow_html=True)
-    st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([0.85, 0.15], vertical_alignment="center")
+    c1.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
-        st.markdown('<div class="x-overlay">', unsafe_allow_html=True)
-        if st.button("✖", key="clear_s"):
-            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        with c2:
+            if st.button("✖", key="clear_s", use_container_width=True):
+                st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
+                st.rerun()
 
 with col_main_2:
-    st.markdown('<div class="row-container">', unsafe_allow_html=True)
-    st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([0.85, 0.15], vertical_alignment="center")
+    c1.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
-        st.markdown('<div class="x-overlay">', unsafe_allow_html=True)
-        if st.button("✖", key="clear_m"):
-            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        with c2:
+            if st.button("✖", key="clear_m", use_container_width=True):
+                st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
+                st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ... (reszta kodu bez zmian) ...
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty:
@@ -400,4 +353,4 @@ else:
         m.fit_bounds(pts)
         st_folium(m, width="100%", height=550)
     else:
-        st.info("👈 Wgraj KML i wybierz bazy.")
+        st.info("👈 Wgraj KML i wybierz bazy.")aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
