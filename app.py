@@ -194,14 +194,24 @@ with st.sidebar:
                 if n and a: st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
 
     if st.button("🔓 WYLOGUJ"):
-        # 1. Usuwamy ciasteczko fizycznie
-        cookie_manager.delete("authenticated_user")
-        # 2. Czyścimy stan sesji, żeby aplikacja od razu wiedziała, że jesteś wylogowany
+        # Pobieramy aktualną listę ciasteczek, żeby sprawdzić czy klucz istnieje
+        current_cookies = cookie_manager.get_all()
+        
+        # 1. Usuwamy ciasteczko tylko jeśli fizycznie istnieje
+        if "authenticated_user" in current_cookies:
+            try:
+                cookie_manager.delete("authenticated_user")
+            except Exception:
+                pass # Ignorujemy błędy, jeśli usuwanie się nie powiodło
+        
+        # 2. Czyścimy stan sesji (to zadziała zawsze, niezależnie od ciasteczek)
         st.session_state['authenticated'] = False
-        # 3. Czyścimy dane projektu, żeby nikt niepowołany ich nie zobaczył
+        
+        # 3. Czyścimy dane projektu dla bezpieczeństwa
         st.session_state['data'] = pd.DataFrame()
         st.session_state['optimized_list'] = []
         st.session_state['geometries'] = []
+        
         # 4. Przeładowujemy stronę
         st.rerun()
 
