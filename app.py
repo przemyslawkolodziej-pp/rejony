@@ -11,27 +11,37 @@ from oauth2client.service_account import ServiceAccountCredentials
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
-# Custom CSS dla kolorystyki i kart
-st.markdown("""
+# Lista dostępnych kolorów dla rejonów
+COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
+
+# Custom CSS - dostosowanie kolorów do przycisku Optymalizacji (#007bff)
+st.markdown(f"""
     <style>
-        .stButton>button { border-radius: 8px; }
-        /* Stylizacja przycisku głównego na stonowany niebieski */
-        div.stButton > button[kind="primary"] {
+        .stButton>button {{ border-radius: 8px; }}
+        /* Kolor przycisku głównego */
+        div.stButton > button[kind="primary"] {{
             background-color: #007bff !important;
             border-color: #007bff !important;
             color: white !important;
-        }
-        /* Stylizacja kart podsumowania */
-        .metric-card {
+        }}
+        /* Kolor wybranych elementów (multiselect, radio) zgodnie z grafiką */
+        div[data-baseweb="tag"] {{
+            background-color: #007bff !important;
+        }}
+        div[role="radiogroup"] [data-active="true"] {{
+            background-color: #007bff !important;
+        }}
+        .metric-card {{
             background-color: #f8f9fa;
             padding: 15px;
             border-radius: 10px;
-            border-left: 5px solid #28a745;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
             margin-bottom: 10px;
-        }
-        .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; }
-        .metric-value { font-size: 1.2rem; color: #28a745; font-weight: bold; }
+            border-left-width: 8px;
+            border-left-style: solid;
+        }}
+        .metric-title {{ font-weight: bold; color: #495057; margin-bottom: 5px; }}
+        .metric-value {{ font-size: 1.1rem; color: #333; font-weight: bold; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -54,22 +64,16 @@ def get_gspread_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-def compress_data(data_dict):
-    json_str = json.dumps(data_dict, ensure_ascii=False, separators=(',', ':'))
-    return base64.b64encode(zlib.compress(json_str.encode('utf-8'))).decode('utf-8')
-
-def decompress_data(compressed_str):
-    try: return json.loads(zlib.decompress(base64.b64decode(compressed_str)).decode('utf-8'))
-    except: return json.loads(compressed_str)
-
 def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
+        # Bazy
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_rows = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
         l_sh.update(values=l_rows, range_name='A1')
+        # Projekty
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
@@ -78,7 +82,7 @@ def sync_save():
             if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
             if 'optimized_list' in s:
                 s['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in s['optimized_list']]
-            p_rows.append([str(p_n), compress_data(s)])
+            p_rows.append([str(p_n), base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()])
         p_sh.update(values=p_rows, range_name='A1')
         st.toast("Zsynchronizowano! ✅")
     except Exception as e: st.error(f"Błąd sync: {e}")
@@ -94,7 +98,7 @@ def sync_load():
         for r in proj_data:
             p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
             if p_n and p_j:
-                c = decompress_data(p_j)
+                c = json.loads(zlib.decompress(base64.b64decode(p_j)))
                 if 'data' in c: c['data'] = pd.DataFrame(c['data'])
                 if 'optimized_list' in c: c['optimized_list'] = [pd.DataFrame(df) for df in c['optimized_list']]
                 loaded[p_n] = c
@@ -105,24 +109,21 @@ def sync_load():
 @st.dialog("Otwórz projekt")
 def modal_open_project():
     if not st.session_state['projects']:
-        st.write("Brak projektów.")
-        return
+        st.write("Brak projektów."); return
     sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
     if st.button("Wczytaj"):
-        st.session_state.update(st.session_state['projects'][sel])
-        st.rerun()
+        st.session_state.update(st.session_state['projects'][sel]); st.rerun()
 
 @st.dialog("Zapisz projekt")
 def modal_save_project():
     n = st.text_input("Nazwa projektu:")
-    if st.button("Zapisz"):
-        if n:
-            st.session_state['projects'][n] = {
-                'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-                'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-                'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
-            }
-            sync_save(); st.rerun()
+    if st.button("Zapisz") and n:
+        st.session_state['projects'][n] = {
+            'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
+            'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
+            'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
+        }
+        sync_save(); st.rerun()
 
 @st.dialog("Dodaj KML")
 def modal_add_kml():
@@ -145,7 +146,7 @@ def modal_add_kml():
 def modal_remove_kml():
     if st.session_state['data'].empty: return
     u_f = sorted(st.session_state['data']['source_file'].unique())
-    to_del = st.multiselect("Wybierz rejon do usunięcia:", u_f)
+    to_del = st.multiselect("Wybierz rejon:", u_f)
     if st.button("Usuń"):
         st.session_state['data'] = st.session_state['data'][~st.session_state['data']['source_file'].isin(to_del)]
         st.rerun()
@@ -154,8 +155,7 @@ def modal_remove_kml():
 def modal_add_base():
     n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
     if st.button("Dodaj") and n and a:
-        st.session_state['saved_locations'][n]=a
-        sync_save(); st.rerun()
+        st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
 
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
@@ -163,7 +163,7 @@ if 'initialized' not in st.session_state:
         'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 
         'optimized_list': [], 'saved_locations': {}, 'projects': {}, 
         'start_coords': None, 'meta_coords': None, 'geometries': [],
-        'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"
+        'start_name': "---", 'meta_name': "---"
     })
 
 if not check_auth():
@@ -173,8 +173,7 @@ if not check_auth():
         if st.form_submit_button("Zaloguj"):
             if p == st.secrets.get("password"):
                 st.query_params["token"] = generate_session_token(p)
-                st.session_state['authenticated'] = True
-                sync_load(); st.rerun()
+                st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
 # --- 5. NAWIGACJA ---
@@ -187,7 +186,7 @@ with st.container():
     if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
     if c[5].button("🏠 Dodaj Bazę", use_container_width=True): modal_add_base()
     if c[6].button("🗑️ Wyczyść", use_container_width=True):
-        st.session_state.update({'data': pd.DataFrame(), 'optimized_list': [], 'geometries': [], 'start_name': "Nie wybrano", 'meta_name': "Nie wybrano", 'start_coords': None, 'meta_coords': None})
+        st.session_state.update({'data': pd.DataFrame(), 'optimized_list': [], 'geometries': [], 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None})
         st.rerun()
 
 st.markdown("---")
@@ -195,21 +194,23 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v186_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v187_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
 bases = sorted(list(st.session_state['saved_locations'].keys()))
 c1, c2 = st.columns(2)
 with c1:
-    s_sel = st.selectbox("🏠 WYBIERZ START:", ["---"] + bases)
-    if s_sel != "---" and s_sel != st.session_state['start_name']:
-        st.session_state.update({'start_name': s_sel, 'start_coords': get_lat_lng(st.session_state['saved_locations'][s_sel])})
+    s_sel = st.selectbox("🏠 WYBIERZ START:", ["---"] + bases, index=0)
+    if s_sel != st.session_state['start_name']:
+        st.session_state['start_name'] = s_sel
+        st.session_state['start_coords'] = get_lat_lng(st.session_state['saved_locations'][s_sel]) if s_sel != "---" else None
         st.rerun()
 with c2:
-    m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases)
-    if m_sel != "---" and m_sel != st.session_state['meta_name']:
-        st.session_state.update({'meta_name': m_sel, 'meta_coords': get_lat_lng(st.session_state['saved_locations'][m_sel])})
+    m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases, index=0)
+    if m_sel != st.session_state['meta_name']:
+        st.session_state['meta_name'] = m_sel
+        st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
         st.rerun()
 
 # --- 7. LOGIKA OBLICZEŃ I MAPA ---
@@ -220,20 +221,23 @@ if not st.session_state['data'].empty:
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
-    mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
+    mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # 1. BLOKADA PRZYCISKU
-    disabled = st.session_state['start_name'] == "Nie wybrano" or st.session_state['meta_name'] == "Nie wybrano"
-    if disabled:
-        st.warning("Wybierz punkt START i META, aby obliczyć trasę.")
+    # 1. BLOKADA PRZYCISKU (Jeśli "---", traktuj jako niewybrane)
+    not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     
-    # 5. USUNIĘTA RAKIETA
-    if st.button("OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True, disabled=disabled):
+    if st.button("OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True, disabled=not_ready):
         with st.spinner("Optymalizacja..."):
             st.session_state.update({'optimized_list': [], 'geometries': []})
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-            grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique()]
+            grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique() if f in v_f]
             
+            # Kolor dla "Jedna trasa" (najwięcej punktów)
+            if mode == "Jedna trasa" and not f_df.empty:
+                main_rejon = f_df['source_file'].value_counts().idxmax()
+                main_idx = u_f.index(main_rejon)
+                single_color = COLORS[main_idx % len(COLORS)]
+
             for idx, g in enumerate(grps):
                 if g.empty: continue
                 curr_p = {"lat": sc['lat'], "lng": sc['lng']}
@@ -254,53 +258,57 @@ if not st.session_state['data'].empty:
                             dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
                     except: pass
                 
+                rejon_name = g['source_file'].iloc[0]
+                rejon_idx = u_f.index(rejon_name)
+                final_color = single_color if mode == "Jedna trasa" else COLORS[rejon_idx % len(COLORS)]
+
                 st.session_state['optimized_list'].append(pd.DataFrame(route))
-                st.session_state['geometries'].append({"geom": geom, "color": ['#007bff','#28a745','#6f42c1','#fd7e14','#20c997'][idx%5], "dist": dist, "time": dur, "name": g['source_file'].iloc[0] if mode != "Jedna trasa" else "Wszystkie"})
+                st.session_state['geometries'].append({
+                    "geom": geom, "color": final_color, "dist": dist, "time": dur, 
+                    "name": rejon_name if mode != "Jedna trasa" else "Wszystkie", 
+                    "pts_count": len(g)
+                })
             st.rerun()
 
-    # MAPA I AUTO-ZOOM (2)
+    # MAPA
     m = folium.Map()
     bounds = []
-
     if st.session_state['start_coords']:
-        sc = st.session_state['start_coords']
-        folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
-        bounds.append([sc['lat'], sc['lng']])
-    
+        bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
+        folium.Marker(bounds[-1], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
     if st.session_state['meta_coords']:
-        mc = st.session_state['meta_coords']
-        folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
-        bounds.append([mc['lat'], mc['lng']])
+        bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
+        folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
     
-    for g in st.session_state['geometries']:
+    # Rysowanie tras i pinezek w kolorach
+    for g_idx, g in enumerate(st.session_state['geometries']):
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     
     if show_pins:
         for _, r in f_df.iterrows():
-            folium.Marker([r['lat'], r['lng']], tooltip=r['display_name']).add_to(m)
+            r_idx = u_f.index(r['source_file'])
+            p_color = COLORS[r_idx % len(COLORS)]
+            folium.CircleMarker([r['lat'], r['lng']], radius=6, color=p_color, fill=True, fill_color=p_color, fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
             bounds.append([r['lat'], r['lng']])
     
-    # Automatyczne dopasowanie widoku
-    if bounds:
-        m.fit_bounds(bounds)
-    
+    if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550)
 
-    # 3. KARTY ZAKŁADEK (SEKCJE)
+    # 3 i 4. PODSUMOWANIE ZE SZCZEGÓŁAMI I KOLOREM KRAWĘDZI
     if st.session_state['geometries']:
-        st.markdown("### 📊 Podsumowanie tras")
+        st.markdown("### 📊 Szczegóły rejonów")
         cols = st.columns(min(len(st.session_state['geometries']), 3))
         for idx, g in enumerate(st.session_state['geometries']):
             with cols[idx % 3]:
                 st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">📍 Rejon: {g['name']}</div>
-                    <div class="metric-value">{g['dist']/1000:.2f} km</div>
+                <div class="metric-card" style="border-left-color: {g['color']};">
+                    <div class="metric-title">📍 {g['name']}</div>
+                    <div class="metric-value">Dystans: {g['dist']/1000:.2f} km</div>
+                    <div class="metric-value">Punkty: {g['pts_count']} szt.</div>
                     <div style="color: #6c757d;">⏱️ Czas: {int(g['time']//60)} min</div>
                 </div>
                 """, unsafe_allow_html=True)
-                with st.expander("Zobacz listę punktów"):
+                with st.expander("Lista punktów"):
                     st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
-
 else:
-    st.info("Dodaj pliki KML oraz wybierz bazy, aby rozpocząć.")
+    st.info("Wgraj KML i wybierz bazy (Start i Meta nie mogą być '---').")
