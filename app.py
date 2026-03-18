@@ -24,19 +24,16 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def compress_data(data_dict):
-    """Komprymuje słownik do krótkiego ciągu tekstowego."""
     json_str = json.dumps(data_dict, ensure_ascii=False, separators=(',', ':'))
     compressed = zlib.compress(json_str.encode('utf-8'))
     return base64.b64encode(compressed).decode('utf-8')
 
 def decompress_data(compressed_str):
-    """Dekomprymuje ciąg tekstowy z powrotem do słownika."""
     try:
         decoded = base64.b64decode(compressed_str)
         decompressed = zlib.decompress(decoded)
         return json.loads(decompressed.decode('utf-8'))
     except:
-        # Jeśli dane nie były skompresowane (stare wpisy), spróbuj wczytać jako zwykły JSON
         return json.loads(compressed_str)
 
 def sync_save():
@@ -45,14 +42,14 @@ def sync_save():
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # --- Zapis BAZ (SavedLocations) ---
+        # Zapis BAZ
         loc_sheet = sheet.worksheet("SavedLocations")
         loc_rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
             loc_rows.append([str(name), str(addr)])
         loc_sheet.update(values=loc_rows, range_name='A1', value_input_option='RAW')
             
-        # --- Zapis PROJEKTÓW (Projects) z kompresją ---
+        # Zapis PROJEKTÓW
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
@@ -60,15 +57,12 @@ def sync_save():
                 serializable['data'] = serializable['data'].to_dict()
             if 'optimized_list' in serializable:
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
-            
-            # KOMPRESJA: Zamiast json.dumps, używamy naszej funkcji
             compressed_payload = compress_data(serializable)
             p_rows.append([str(p_name), compressed_payload])
         
         proj_sheet = sheet.worksheet("Projects")
         proj_sheet.update(values=p_rows, range_name='A1', value_input_option='RAW')
-        
-        st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
+        st.toast("Zsynchronizowano! ✅", icon="☁️")
     except Exception as e:
         st.error(f"⚠️ BŁĄD SYNCHRONIZACJI: {str(e)}")
 
@@ -77,25 +71,20 @@ def sync_load():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        
-        # Wczytanie BAZ
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data if 'Nazwa' in row}
-        
-        # Wczytanie PROJEKTÓW z dekompresją
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded_projs = {}
         for row in proj_data:
             p_name, p_json = row.get('Nazwa Projektu'), row.get('Dane JSON')
             if p_name and p_json:
-                p_content = decompress_data(p_json) # DEKOMPRESJA
+                p_content = decompress_data(p_json)
                 if 'data' in p_content: p_content['data'] = pd.DataFrame(p_content['data'])
                 if 'optimized_list' in p_content:
                     p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
                 loaded_projs[p_name] = p_content
         st.session_state['projects'] = loaded_projs
-    except Exception as e:
-        print(f"Błąd ładowania: {e}")
+    except: pass
 
 # --- 3. INICJALIZACJA SESJI ---
 for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
@@ -127,7 +116,7 @@ if not check_password(): st.stop()
 # --- 4. STYLE CSS ---
 st.markdown("""
 <style>
-    div.stButton > button { height: 40px; width: 100%; font-size: 20px !important; border-radius: 8px; margin-bottom: 5px; }
+    div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; padding: 0px !important; display: flex; align-items: center; justify-content: center; }
     .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 5px; font-size: 15px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
@@ -145,7 +134,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v113_geo")
+        gl = Nominatim(user_agent="v114_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -192,7 +181,7 @@ with st.sidebar:
         with st.expander("📂 Zarządzaj rejonami", expanded=True):
             u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
             for f_name in u_files:
-                c1, c2 = st.columns([4, 1])
+                c1, c2 = st.columns([4, 1.2])
                 c1.write(f"📄 {f_name}")
                 if c2.button("🗑️", key=f"del_file_{f_name}"):
                     st.session_state['data'] = st.session_state['data'][st.session_state['data']['source_file'] != f_name].reset_index(drop=True)
@@ -282,26 +271,33 @@ if not st.session_state['data'].empty:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    if st.button("OBLICZ TRASY", type="primary", use_container_width=True):
-        if not (sc and mc): st.error("Ustaw Start i Metę!")
-        else:
-            with st.spinner("Obliczanie..."):
-                st.session_state.update({'optimized_list': [], 'geometries': []})
-                groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
-                for group in groups:
-                    if group.empty: continue
-                    source_name = group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość"
-                    route_color = file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa" else 'green'
-                    curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START"}
-                    route, unv = [curr], group.to_dict('records')
-                    while unv:
-                        nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
-                        route.append(nxt); curr = nxt; unv.remove(nxt)
-                    route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META"})
-                    geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
-                    st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({"geom": geom, "color": route_color, "dist": d, "time": t, "pts_count": len(group), "name": source_name, "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"})
-                st.rerun()
+    # --- NOWE PRZYCISKI ---
+    col_calc, col_reset = st.columns([4, 1])
+    with col_calc:
+        if st.button("OBLICZ TRASY", type="primary", use_container_width=True):
+            if not (sc and mc): st.error("Ustaw Start i Metę!")
+            else:
+                with st.spinner("Obliczanie..."):
+                    st.session_state.update({'optimized_list': [], 'geometries': []})
+                    groups = [filtered_df] if mode == "Jedna trasa" else [filtered_df[filtered_df['source_file'] == f] for f in filtered_df['source_file'].unique()]
+                    for group in groups:
+                        if group.empty: continue
+                        source_name = group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość"
+                        route_color = file_color_map.get(group['source_file'].iloc[0], 'blue') if mode != "Jedna trasa" else 'green'
+                        curr = {"lat": sc['lat'], "lng": sc['lng'], "display_name": "START"}
+                        route, unv = [curr], group.to_dict('records')
+                        while unv:
+                            nxt = min(unv, key=lambda x: get_math_dist(curr['lat'], curr['lng'], x['lat'], x['lng']))
+                            route.append(nxt); curr = nxt; unv.remove(nxt)
+                        route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META"})
+                        geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
+                        st.session_state['optimized_list'].append(pd.DataFrame(route))
+                        st.session_state['geometries'].append({"geom": geom, "color": route_color, "dist": d, "time": t, "pts_count": len(group), "name": source_name, "source_file": group['source_file'].iloc[0] if mode != "Jedna trasa" else "ALL"})
+                    st.rerun()
+    with col_reset:
+        if st.button("✖ WYCZYŚĆ", use_container_width=True):
+            st.session_state.update({'optimized_list': [], 'geometries': [], 'data': pd.DataFrame()})
+            st.rerun()
 
     m = folium.Map()
     all_coords = [[sc['lat'], sc['lng']]] if sc else []
