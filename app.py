@@ -8,7 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 1. KONFIGURACJA ---
-# WPISZ TUTAJ SWOJE ID ARKUSZA
+# TWOJE ID ARKUSZA ZOSTAŁO WKLEJONE PONIŻEJ
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
@@ -17,57 +17,60 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets["gcp_service_account"])
-    
-    # Zabezpieczenie formatowania klucza
     raw_key = creds_dict["private_key"].strip().strip('"').strip("'")
     if "\\n" in raw_key:
         raw_key = raw_key.replace("\\n", "\n")
     creds_dict["private_key"] = raw_key
-    
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 def sync_save():
-    if SHEET_ID == "TWOJE_ID_ARKUSZA_TUTAJ": return
+    if not SHEET_ID: return
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # Zapis BAZ (SavedLocations)
+        # --- Zapis BAZ (SavedLocations) ---
         loc_sheet = sheet.worksheet("SavedLocations")
+        loc_rows = [["Nazwa", "Adres"]] 
+        if st.session_state['saved_locations']:
+            for name, addr in st.session_state['saved_locations'].items():
+                loc_rows.append([str(name), str(addr)])
+        
         loc_sheet.clear()
-        loc_rows = [["Nazwa", "Adres"]]
-        for name, addr in st.session_state['saved_locations'].items():
-            loc_rows.append([name, addr])
-        # Nowa składnia gspread v6.0+
-        loc_sheet.update(values=loc_rows, range_name='A1')
+        loc_sheet.update(range_name='A1', values=loc_rows)
             
-        # Zapis PROJEKTÓW (Projects)
+        # --- Zapis PROJEKTÓW (Projects) ---
         proj_sheet = sheet.worksheet("Projects")
+        p_rows = [["Nazwa Projektu", "Dane JSON"]] 
+        if st.session_state['projects']:
+            for p_name, p_data in st.session_state['projects'].items():
+                serializable = p_data.copy()
+                if isinstance(serializable.get('data'), pd.DataFrame):
+                    serializable['data'] = serializable['data'].to_dict()
+                if 'optimized_list' in serializable:
+                    serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
+                
+                json_data = json.dumps(serializable, ensure_ascii=False)
+                p_rows.append([str(p_name), json_data])
+        
         proj_sheet.clear()
-        p_rows = [["Nazwa Projektu", "Dane JSON"]]
-        for p_name, p_data in st.session_state['projects'].items():
-            serializable = p_data.copy()
-            if isinstance(serializable.get('data'), pd.DataFrame):
-                serializable['data'] = serializable['data'].to_dict()
-            if 'optimized_list' in serializable:
-                serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
-            p_rows.append([p_name, json.dumps(serializable, ensure_ascii=False)])
-        # Nowa składnia gspread v6.0+
-        proj_sheet.update(values=p_rows, range_name='A1')
+        proj_sheet.update(range_name='A1', values=p_rows)
         
         st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
     except Exception as e:
-        st.error(f"Błąd synchronizacji: {e}")
+        st.error(f"⚠️ BŁĄD SYNCHRONIZACJI: {str(e)}")
 
 def sync_load():
-    if SHEET_ID == "TWOJE_ID_ARKUSZA_TUTAJ": return
+    if not SHEET_ID: return
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
+        
         # Wczytanie BAZ
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data if 'Nazwa' in row}
+        
         # Wczytanie PROJEKTÓW
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded_projs = {}
@@ -114,7 +117,6 @@ st.markdown("""
 <style>
     div.stButton > button { height: 40px; width: 100%; font-size: 20px !important; border-radius: 8px; margin-bottom: 5px; }
     .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 5px; font-size: 15px; }
-    .btn-clear { color: #ff4b4b !important; font-size: 12px !important; text-align: right; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -131,7 +133,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v108_geo")
+        gl = Nominatim(user_agent="v110_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
