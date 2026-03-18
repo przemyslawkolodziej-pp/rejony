@@ -16,30 +16,63 @@ COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc
 st.markdown("""
     <style>
         .stButton>button { border-radius: 8px; }
-        div.stButton > button[kind="primary"] { background-color: #007bff !important; color: white !important; border: none !important; }
-        div.stButton > button[disabled] { background-color: #f0f2f6 !important; color: #6c757d !important; border: 1px solid #dcdcdc !important; opacity: 1 !important; }
         
+        /* Ramki dla rejonów w kolumnie */
+        .rejon-item {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            background-color: #ffffff;
+        }
+
+        /* Karty podsumowania */
         .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 8px solid; }
         .metric-title { font-weight: bold; color: #495057; margin-bottom: 8px; font-size: 1.1rem; }
         .metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; color: #333; font-weight: 500; }
         .metric-icon { width: 20px; text-align: center; }
-        
-        /* Styl dla kontenera rejonów */
-        .rejon-box { border: 1px solid #eee; border-radius: 5px; padding: 10px; background: #ffffff; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FUNKCJE POMOCNICZE ---
-def generate_session_token(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+# --- 2. FUNKCJE LOGIKI ---
+def get_lat_lng(addr):
+    try:
+        loc = Nominatim(user_agent="v198_opt").geocode(addr, timeout=10)
+        return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
+    except: return None
 
+def optimize_route(df_points, start_coords, meta_coords, color_idx):
+    """Funkcja wykonująca obliczenia trasy dla pojedynczego rejonu"""
+    curr_p = {"lat": start_coords['lat'], "lng": start_coords['lng']}
+    route, unv = [curr_p], df_points.to_dict('records')
+    while unv:
+        nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
+        route.append(nxt); curr_p = nxt; unv.remove(nxt)
+    route.append({"display_name": "META", "lat": meta_coords['lat'], "lng": meta_coords['lng']})
+    
+    coords = [[r['lat'], r['lng']] for r in route]
+    geom, dist, dur = [], 0, 0
+    for j in range(0, len(coords)-1, 39):
+        chunk = coords[j:j+40]
+        try:
+            r = requests.get(f"http://router.project-osrm.org/route/v1/driving/{';'.join([f'{c[1]},{c[0]}' for c in chunk])}?overview=full&geometries=geojson").json()
+            if r['code']=='Ok':
+                geom.extend(r['routes'][0]['geometry']['coordinates'])
+                dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
+        except: pass
+    
+    return {
+        "geom": geom, "color": COLORS[color_idx % len(COLORS)], 
+        "dist": dist, "time": dur, "pts_count": len(df_points), "df": pd.DataFrame(route)
+    }
+
+# --- FUNKCJE SYNC ---
 def check_auth():
     if st.session_state.get('authenticated'): return True
     params = st.query_params
-    if "token" in params:
-        if params["token"] == generate_session_token(st.secrets.get("password", "")):
-            st.session_state['authenticated'] = True
-            return True
+    if "token" in params and params["token"] == hashlib.sha256(st.secrets.get("password", "").encode()).hexdigest():
+        st.session_state['authenticated'] = True
+        return True
     return False
 
 def get_gspread_client():
@@ -55,7 +88,6 @@ def sync_save():
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_sh.update(values=[["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()], range_name='A1')
-        
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
@@ -111,20 +143,33 @@ def modal_save_project():
         }
         sync_save(); st.rerun()
 
-@st.dialog("Dodaj KML")
+@st.dialog("Wczytaj i przelicz optymalne trasy")
 def modal_add_kml():
+    if st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---":
+        st.error("⚠️ Najpierw wybierz START i METĘ!"); return
+    
     up = st.file_uploader("Wybierz pliki KML", type=['kml'], accept_multiple_files=True)
-    if st.button("Wczytaj i zamknij") and up:
-        all_pts = []
-        for f in up:
-            content = f.read().decode('utf-8')
-            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
-                n = re.search(r'<(?:name|display_name)>(.*?)</', pm)
-                c = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
-                if c: all_pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": f.name})
-        if all_pts:
-            st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(all_pts)], ignore_index=True).drop_duplicates()
-            st.rerun()
+    if st.button("Wczytaj i Oblicz") and up:
+        with st.spinner("Przeliczanie tras..."):
+            for f in up:
+                content = f.read().decode('utf-8')
+                pts = []
+                for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
+                    n = re.search(r'<(?:name|display_name)>(.*?)</', pm)
+                    c = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
+                    if c: pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": f.name})
+                
+                if pts:
+                    df_new = pd.DataFrame(pts)
+                    st.session_state['data'] = pd.concat([st.session_state['data'], df_new], ignore_index=True).drop_duplicates()
+                    
+                    # Natychmiastowe obliczenie
+                    all_files = sorted(st.session_state['data']['source_file'].unique().tolist())
+                    color_idx = all_files.index(f.name)
+                    st.session_state['optimized_cache'][f.name] = optimize_route(
+                        df_new, st.session_state['start_coords'], st.session_state['meta_coords'], color_idx
+                    )
+        st.rerun()
 
 @st.dialog("Usuń KML")
 def modal_remove_kml():
@@ -152,8 +197,7 @@ if 'initialized' not in st.session_state:
         'start_name': "---", 'meta_name': "---"
     })
 
-if check_auth() and not st.session_state['projects']:
-    sync_load()
+if check_auth() and not st.session_state['projects']: sync_load()
 
 if not check_auth():
     st.title("🔐 Logowanie")
@@ -161,7 +205,7 @@ if not check_auth():
         p = st.text_input("Hasło:", type="password")
         if st.form_submit_button("Zaloguj"):
             if p == st.secrets.get("password"):
-                st.query_params["token"] = generate_session_token(p)
+                st.query_params["token"] = hashlib.sha256(p.encode()).hexdigest()
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
@@ -183,12 +227,6 @@ with st.container():
 st.markdown("---")
 
 # --- 6. WYBÓR PUNKTÓW ---
-def get_lat_lng(addr):
-    try:
-        loc = Nominatim(user_agent="v197_opt").geocode(addr, timeout=10)
-        return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
-    except: return None
-
 bases = sorted(list(st.session_state['saved_locations'].keys()))
 c1, c2 = st.columns(2)
 with c1:
@@ -204,81 +242,51 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
         st.session_state['optimized_cache'] = {}; st.rerun()
 
-# --- 7. PANEL STEROWANIA REJONAMI (ZAMIAST MULTISELECTA) ---
+# --- 7. PANEL REJONÓW (LISTA PIONOWA Z RAMKAMI) ---
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    st.write("### 🗺️ Wybierz rejony do wyświetlenia")
-    v_f = []
-    with st.container(height=180):
-        cols_rejs = st.columns(4)
-        for i, rej_name in enumerate(all_rejs):
-            is_calc = " ✅" if rej_name in st.session_state['optimized_cache'] else ""
-            if cols_rejs[i % 4].checkbox(f"{rej_name}{is_calc}", value=True, key=f"chk_{rej_name}"):
-                v_f.append(rej_name)
+    col_list, col_map = st.columns([1, 3])
     
-    cv1, cv2 = st.columns(2)
-    show_pins = cv1.checkbox("Pokaż pinezki", value=True)
-    mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
+    with col_list:
+        st.write("### 📍 Rejony")
+        v_f = []
+        with st.container(height=500):
+            for rej_name in all_rejs:
+                # Każdy rejon w osobnej ramce (div)
+                st.markdown(f'<div class="rejon-item">', unsafe_allow_html=True)
+                if st.checkbox(f"{rej_name}", value=True, key=f"chk_{rej_name}"):
+                    v_f.append(rej_name)
+                st.markdown('</div>', unsafe_allow_html=True)
+        
+        show_pins = st.checkbox("Pokaż pinezki", value=True)
+        mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    to_calc = [f for f in v_f if f not in st.session_state['optimized_cache']]
-    not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
-    
-    if not_ready: btn_label, btn_dis = "WYBIERZ START I METĘ, ABY OBLICZYĆ", True
-    elif not to_calc: btn_label, btn_dis = "WSZYSTKIE WYBRANE REJONY SĄ JUŻ OBLICZONE", True
-    else: btn_label, btn_dis = f"OBLICZ REJONY ({len(to_calc)})", False
+    with col_map:
+        m = folium.Map()
+        bounds = []
+        if st.session_state['start_coords']:
+            bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
+            folium.Marker(bounds[-1], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
+        if st.session_state['meta_coords']:
+            bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
+            folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
+        
+        active_routes = {k: v for k, v in st.session_state['optimized_cache'].items() if k in v_f}
+        for name, data in active_routes.items():
+            folium.PolyLine([[c[1], c[0]] for c in data['geom']], color=data['color'], weight=5, opacity=0.8).add_to(m)
+            if show_pins:
+                pts = st.session_state['data'][st.session_state['data']['source_file'] == name]
+                for _, r in pts.iterrows():
+                    folium.CircleMarker([r['lat'], r['lng']], radius=6, color=data['color'], fill=True, fill_color=data['color'], fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
+                    bounds.append([r['lat'], r['lng']])
+        
+        if bounds: m.fit_bounds(bounds)
+        st_folium(m, width="100%", height=550)
 
-    if st.button(btn_label, type="primary", use_container_width=True, disabled=btn_dis):
-        with st.spinner("Obliczanie..."):
-            sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-            for f_name in to_calc:
-                g = st.session_state['data'][st.session_state['data']['source_file'] == f_name]
-                curr_p = {"lat": sc['lat'], "lng": sc['lng']}
-                route, unv = [curr_p], g.to_dict('records')
-                while unv:
-                    nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
-                    route.append(nxt); curr_p = nxt; unv.remove(nxt)
-                route.append({"display_name": "META", "lat": mc['lat'], "lng": mc['lng']})
-                
-                coords = [[r['lat'], r['lng']] for r in route]
-                geom, dist, dur = [], 0, 0
-                for j in range(0, len(coords)-1, 39):
-                    chunk = coords[j:j+40]
-                    try:
-                        r = requests.get(f"http://router.project-osrm.org/route/v1/driving/{';'.join([f'{c[1]},{c[0]}' for c in chunk])}?overview=full&geometries=geojson").json()
-                        if r['code']=='Ok':
-                            geom.extend(r['routes'][0]['geometry']['coordinates'])
-                            dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
-                    except: pass
-                st.session_state['optimized_cache'][f_name] = {
-                    "geom": geom, "color": COLORS[all_rejs.index(f_name) % len(COLORS)], 
-                    "dist": dist, "time": dur, "pts_count": len(g), "df": pd.DataFrame(route)
-                }
-            st.rerun()
-
-    m = folium.Map()
-    bounds = []
-    if st.session_state['start_coords']:
-        bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
-        folium.Marker(bounds[-1], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
-    if st.session_state['meta_coords']:
-        bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
-        folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
-    
-    active_routes = {k: v for k, v in st.session_state['optimized_cache'].items() if k in v_f}
-    for name, data in active_routes.items():
-        folium.PolyLine([[c[1], c[0]] for c in data['geom']], color=data['color'], weight=5, opacity=0.8).add_to(m)
-        if show_pins:
-            pts = st.session_state['data'][st.session_state['data']['source_file'] == name]
-            for _, r in pts.iterrows():
-                folium.CircleMarker([r['lat'], r['lng']], radius=6, color=data['color'], fill=True, fill_color=data['color'], fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
-                bounds.append([r['lat'], r['lng']])
-    
-    if bounds: m.fit_bounds(bounds)
-    st_folium(m, width="100%", height=550)
-
+    # --- PODSUMOWANIE ---
     if active_routes:
-        st.markdown("### 📊 Szczegóły wybranych rejonów")
+        st.markdown("### 📊 Szczegóły")
         cols = st.columns(min(len(active_routes), 3))
         for idx, (name, data) in enumerate(active_routes.items()):
             with cols[idx % 3]:
@@ -293,4 +301,4 @@ if not st.session_state['data'].empty:
                 with st.expander("Lista punktów"):
                     st.dataframe(data['df'][['display_name']], use_container_width=True)
 else:
-    st.info("Wgraj KML i wybierz bazy.")
+    st.info("Wgraj KML (pamiętaj o wyborze STARTU i METY).")
