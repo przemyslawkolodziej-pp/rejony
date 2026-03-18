@@ -239,10 +239,22 @@ with st.sidebar:
 st.title("🗺️ Optymalizator Tras")
 
 c1, c2 = st.columns(2)
+
 with c1:
+    # Kontener dla Startu z przyciskiem czyszczenia
     st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state["start_name"] != "Nie wybrano":
+        if st.button("✖ Wyczyść Start", key="clear_start"):
+            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
+            st.rerun()
+
 with c2:
+    # Kontener dla Mety z przyciskiem czyszczenia
     st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state["meta_name"] != "Nie wybrano":
+        if st.button("✖ Wyczyść Metę", key="clear_meta"):
+            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
+            st.rerun()
 
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
