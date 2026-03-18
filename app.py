@@ -28,23 +28,25 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def sync_save():
-    if SHEET_ID == "TWOJE_ID_ARKUSZA": return
+    if SHEET_ID == "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE": return
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # Zapis BAZ
+        # 1. Zapis BAZ (SavedLocations)
         loc_sheet = sheet.worksheet("SavedLocations")
         loc_sheet.clear()
-        rows = [["Nazwa", "Adres"]]
+        loc_rows = [["Nazwa", "Adres"]] # Nagłówki
         for name, addr in st.session_state['saved_locations'].items():
-            rows.append([name, addr])
-        loc_sheet.update('A1', rows)
+            loc_rows.append([name, addr])
+        
+        # POPRAWKA: Używamy nazwanych argumentów, aby uniknąć DeprecationWarning
+        loc_sheet.update(values=loc_rows, range_name='A1')
             
-        # Zapis PROJEKTÓW
+        # 2. Zapis PROJEKTÓW (Projects)
         proj_sheet = sheet.worksheet("Projects")
         proj_sheet.clear()
-        p_rows = [["Nazwa Projektu", "Dane JSON"]]
+        p_rows = [["Nazwa Projektu", "Dane JSON"]] # Nagłówki
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
             if isinstance(serializable.get('data'), pd.DataFrame):
@@ -52,14 +54,16 @@ def sync_save():
             if 'optimized_list' in serializable:
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
             p_rows.append([p_name, json.dumps(serializable, ensure_ascii=False)])
-        proj_sheet.update('A1', p_rows)
+        
+        # POPRAWKA: Tutaj również nazwane argumenty
+        proj_sheet.update(values=p_rows, range_name='A1')
         
         st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
     except Exception as e:
         st.error(f"Błąd synchronizacji: {e}")
 
 def sync_load():
-    if SHEET_ID == "TWOJE_ID_ARKUSZA": return
+    if SHEET_ID == "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE": return
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
