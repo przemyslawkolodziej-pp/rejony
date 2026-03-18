@@ -13,7 +13,7 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# Custom CSS - Wymuszenie kolorów na Multiselect, Checkbox i Radio
+# --- CUSTOM CSS (Agresywne nadpisywanie stylów) ---
 st.markdown(f"""
     <style>
         .stButton>button {{ border-radius: 8px; }}
@@ -22,20 +22,36 @@ st.markdown(f"""
         div.stButton > button[kind="primary"] {{
             background-color: #007bff !important;
             border-color: #007bff !important;
+            color: white !important;
+        }}
+        /* Styl dla nieaktywnego przycisku (poprawa czytelności) */
+        div.stButton > button[disabled] {{
+            background-color: #eeeeee !important;
+            border-color: #dddddd !important;
+            color: #888888 !important;
         }}
 
-        /* 2. Multiselect - Pigułki (Tagi) */
-        span[data-baseweb="tag"] {{
+        /* 2. Multiselect - Niebieskie pigułki */
+        div[data-baseweb="tag"] {{
             background-color: #007bff !important;
+        }}
+        div[data-baseweb="tag"] span {{
             color: white !important;
         }}
         
-        /* 3. Checkbox (Pokaż pinezki) - kolor po zaznaczeniu */
-        div[data-testid="stCheckbox"] input[checked] + div {{
-            background-color: #007bff !important;
+        /* 3. Checkbox (Pokaż pinezki) - Samo okienko */
+        div[data-testid="stCheckbox"] [data-baseweb="checkbox"] > div {{
+            background-color: transparent;
         }}
-        
-        /* 4. Radio Buttons - kropka wyboru */
+        div[data-testid="stCheckbox"] input:checked + div {{
+            background-color: #007bff !important;
+            border-color: #007bff !important;
+        }}
+
+        /* 4. Radio Buttons - Kropka */
+        div[role="radiogroup"] div[data-baseweb="radio"] > div:first-child {{
+            border-color: #007bff !important;
+        }}
         div[role="radiogroup"] div[data-baseweb="radio"] div[size] {{
             background-color: #007bff !important;
         }}
@@ -55,7 +71,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FUNKCJE POMOCNICZE (BEZ ZMIAN) ---
+# --- 2. FUNKCJE (BEZ ZMIAN) ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -186,9 +202,9 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA ---
+# --- 5. NAWIGACJA (8 Przycieków - dodano Wyloguj) ---
 with st.container():
-    c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2])
+    c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
     if c[1].button("💾 Zapisz", use_container_width=True): modal_save_project()
     if c[2].button("➕ Zapisz jako Nowy", use_container_width=True): modal_save_project()
@@ -198,13 +214,15 @@ with st.container():
     if c[6].button("🗑️ Wyczyść", use_container_width=True):
         st.session_state.update({'data': pd.DataFrame(), 'optimized_list': [], 'geometries': [], 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None})
         st.rerun()
+    if c[7].button("🔓 Wyloguj", use_container_width=True):
+        st.query_params.clear(); st.session_state.clear(); st.rerun()
 
 st.markdown("---")
 
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v189_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v190_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -233,7 +251,7 @@ if not st.session_state['data'].empty:
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # LOGIKA PRZYCISKU (Wyszarzony + Sugestia treści)
+    # LOGIKA PRZYCISKU
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     btn_label = "OBLICZ OPTYMALNE TRASY" if not not_ready else "WYBIERZ START I METĘ, ABY OBLICZYĆ"
     
