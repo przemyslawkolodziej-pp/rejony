@@ -101,10 +101,9 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 4. STYLE CSS (NAPRAWA PRZYCISKÓW) ---
+# --- 4. STYLE CSS (POPRAWKA GAP) ---
 st.markdown("""
 <style>
-    /* Pasek info */
     .info-bar-v132 {
         background-color: #f0f2f6;
         border-left: 5px solid #28a745;
@@ -117,16 +116,17 @@ st.markdown("""
         width: 100%;
     }
     
-    /* Przycisk X - stylizowany na pigułkę */
+    /* Styl przycisku X */
     div[data-testid="stHorizontalBlock"] button[key*="btn_clr_"] {
         border-radius: 0 8px 8px 0 !important;
         border: none !important;
         background-color: #f0f2f6 !important;
         color: #ff4b4b !important;
         height: 45px !important;
-        margin-left: -1px !important; /* Łączenie z paskiem */
+        width: 100% !important;
         font-weight: bold !important;
         font-size: 20px !important;
+        padding: 0 !important;
     }
     
     div[data-testid="stHorizontalBlock"] button[key*="btn_clr_"]:hover {
@@ -251,13 +251,14 @@ with st.sidebar:
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
-# --- 7. PANEL GŁÓWNY (POWRÓT DO STABLINYCH KOLUMN) ---
+# --- 7. PANEL GŁÓWNY (POPRAWKA GAP) ---
 st.title("🗺️ Optymalizator Tras")
 
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    c_p, c_b = st.columns([0.88, 0.12], gap="none", vertical_alignment="center")
+    # Zmieniono gap na "small"
+    c_p, c_b = st.columns([0.88, 0.12], gap="small", vertical_alignment="center")
     c_p.markdown(f'<div class="info-bar-v132">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
         if c_b.button("×", key="btn_clr_start"):
@@ -265,7 +266,8 @@ with col_main_1:
             st.rerun()
 
 with col_main_2:
-    c_p, c_b = st.columns([0.88, 0.12], gap="none", vertical_alignment="center")
+    # Zmieniono gap na "small"
+    c_p, c_b = st.columns([0.88, 0.12], gap="small", vertical_alignment="center")
     c_p.markdown(f'<div class="info-bar-v132">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
         if c_b.button("×", key="btn_clr_meta"):
@@ -274,7 +276,7 @@ with col_main_2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- MAPA I OBLICZENIA ---
+# --- MAPA I OBLICZENIA (POZOSTAŁE BEZ ZMIAN) ---
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 if not st.session_state['data'].empty:
     col_filters, col_view = st.columns([2, 1])
