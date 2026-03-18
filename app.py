@@ -3,12 +3,11 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
-import re, math, json, requests, os
+import re, math, json, requests, os, time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 1. KONFIGURACJA ---
-# TWOJE ID ARKUSZA ZOSTAŁO WKLEJONE PONIŻEJ
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
@@ -32,30 +31,30 @@ def sync_save():
         
         # --- Zapis BAZ (SavedLocations) ---
         loc_sheet = sheet.worksheet("SavedLocations")
-        loc_rows = [["Nazwa", "Adres"]] 
-        if st.session_state['saved_locations']:
-            for name, addr in st.session_state['saved_locations'].items():
-                loc_rows.append([str(name), str(addr)])
+        loc_rows = [["Nazwa", "Adres"]]
+        for name, addr in st.session_state['saved_locations'].items():
+            loc_rows.append([str(name), str(addr)])
         
         loc_sheet.clear()
-        loc_sheet.update(range_name='A1', values=loc_rows)
+        loc_sheet.update(values=loc_rows, range_name='A1')
             
         # --- Zapis PROJEKTÓW (Projects) ---
-        proj_sheet = sheet.worksheet("Projects")
-        p_rows = [["Nazwa Projektu", "Dane JSON"]] 
-        if st.session_state['projects']:
-            for p_name, p_data in st.session_state['projects'].items():
-                serializable = p_data.copy()
-                if isinstance(serializable.get('data'), pd.DataFrame):
-                    serializable['data'] = serializable['data'].to_dict()
-                if 'optimized_list' in serializable:
-                    serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
-                
-                json_data = json.dumps(serializable, ensure_ascii=False)
-                p_rows.append([str(p_name), json_data])
+        # Przygotowujemy dane ZANIM wyczyścimy arkusz
+        p_rows = [["Nazwa Projektu", "Dane JSON"]]
+        for p_name, p_data in st.session_state['projects'].items():
+            serializable = p_data.copy()
+            if isinstance(serializable.get('data'), pd.DataFrame):
+                serializable['data'] = serializable['data'].to_dict()
+            if 'optimized_list' in serializable:
+                serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
+            
+            json_data = json.dumps(serializable, ensure_ascii=False)
+            p_rows.append([str(p_name), json_data])
         
+        proj_sheet = sheet.worksheet("Projects")
         proj_sheet.clear()
-        proj_sheet.update(range_name='A1', values=p_rows)
+        # Używamy surowego update dla dużych danych
+        proj_sheet.update(values=p_rows, range_name='A1')
         
         st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
     except Exception as e:
@@ -133,7 +132,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v110_geo")
+        gl = Nominatim(user_agent="v111_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -203,6 +202,7 @@ with st.sidebar:
                     if st.button("🗑️", key=f"d_{sel_b}"):
                         del st.session_state['saved_locations'][sel_b]
                         sync_save()
+                        time.sleep(0.5)
                         st.rerun()
         st.markdown("---")
         with st.form("new_b", clear_on_submit=True):
@@ -236,6 +236,7 @@ with st.sidebar:
                     if st.button("🗑️", key=f"del_proj_{sel_p}"):
                         del st.session_state['projects'][sel_p]
                         sync_save()
+                        time.sleep(0.5)
                         st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
