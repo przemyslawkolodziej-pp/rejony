@@ -7,33 +7,40 @@ import re, math, json, requests, os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. KONFIGURACJA STRONY ---
+# --- 1. KONFIGURACJA ---
+# TUTAJ WKLEJ ID SWOJEGO ARKUSZA (z paska adresu między /d/ a /edit/)
+SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
+
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
 # --- 2. INTEGRACJA Z GOOGLE SHEETS ---
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets["gcp_service_account"])
+    # Naprawa znaku nowej linii w kluczu prywatnym, jeśli TOML go zniekształcił
+    if "\\n" in creds_dict["private_key"]:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 def sync_save():
     try:
         client = get_gspread_client()
-        sheet = client.open_by_key("1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE")
+        sheet = client.open_by_key(SHEET_ID)
         
         # Zapis BAZ (Saved Locations)
         loc_sheet = sheet.worksheet("SavedLocations")
         loc_sheet.clear()
-        loc_sheet.append_row(["Nazwa", "Adres"])
+        # Przygotowanie danych do zapisu zbiorczego (szybsze i pewniejsze)
+        rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
-            loc_sheet.append_row([name, addr])
+            rows.append([name, addr])
+        loc_sheet.update('A1', rows)
             
-        # Zapis PROJEKTÓW
+        # Zapis PROJEKTÓW (Projects)
         proj_sheet = sheet.worksheet("Projects")
         proj_sheet.clear()
-        proj_sheet.append_row(["Nazwa Projektu", "Dane JSON"])
-        
+        p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable_data = p_data.copy()
             if isinstance(serializable_data.get('data'), pd.DataFrame):
@@ -42,37 +49,44 @@ def sync_save():
                 serializable_data['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable_data['optimized_list']]
             
             json_str = json.dumps(serializable_data, ensure_ascii=False)
-            proj_sheet.append_row([p_name, json_str])
+            p_rows.append([p_name, json_str])
+        proj_sheet.update('A1', p_rows)
             
         st.sidebar.success("Zsynchronizowano z Google Sheets! ✅")
     except Exception as e:
-        st.error(f"Błąd zapisu do Google Sheets: {e}")
+        # TO WYŚWIETLI BŁĄD JEŚLI ZAPIS SIĘ NIE UDA
+        st.error(f"BŁĄD GOOGLE SHEETS: {e}")
 
 def sync_load():
+    if SHEET_ID == "TWÓJ_ID_ARKUSZA_TUTAJ":
+        return
     try:
         client = get_gspread_client()
-        sheet = client.open_by_key("1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE")
+        sheet = client.open_by_key(SHEET_ID)
         
         # Wczytanie BAZ
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
-        st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data}
+        if loc_data:
+            st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data if 'Nazwa' in row}
         
         # Wczytanie PROJEKTÓW
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded_projs = {}
         for row in proj_data:
-            p_name = row['Nazwa Projektu']
-            p_content = json.loads(row['Dane JSON'])
-            if 'data' in p_content:
-                p_content['data'] = pd.DataFrame(p_content['data'])
-            if 'optimized_list' in p_content:
-                p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
-            loaded_projs[p_name] = p_content
+            p_name = row.get('Nazwa Projektu')
+            p_json = row.get('Dane JSON')
+            if p_name and p_json:
+                p_content = json.loads(p_json)
+                if 'data' in p_content:
+                    p_content['data'] = pd.DataFrame(p_content['data'])
+                if 'optimized_list' in p_content:
+                    p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
+                loaded_projs[p_name] = p_content
         st.session_state['projects'] = loaded_projs
-    except:
-        pass
+    except Exception as e:
+        st.sidebar.warning(f"Baza danych jest pusta lub niedostępna.")
 
-# Inicjalizacja sesji
+# --- 3. INICJALIZACJA SESJI ---
 for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
     if key not in st.session_state: 
         if key == 'authenticated': st.session_state[key] = False
@@ -99,18 +113,16 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 3. STYLE CSS ---
+# --- 4. STYLE CSS ---
 st.markdown("""
 <style>
     div.stButton > button { height: 40px; width: 100%; font-size: 20px !important; border-radius: 8px; margin-bottom: 5px; }
     .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 10px; font-size: 15px; }
-    .stats-card { background-color: rgba(0,0,0,0.03); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.1); margin-bottom: 20px; }
-    .route-sum { font-weight: bold; font-size: 18px; border-top: 3px solid #28a745; padding-top: 10px; margin-top: 20px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. LOGIKA POMOCNICZA ---
+# --- 5. LOGIKA POMOCNICZA ---
 def get_folium_color(idx):
     colors = ['blue', 'red', 'green', 'orange', 'purple', 'cadetblue', 'darkred', 'darkblue', 'darkgreen', 'pink', 'lightblue']
     return colors[idx % len(colors)]
@@ -122,7 +134,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v102_geo")
+        gl = Nominatim(user_agent="v103_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -152,7 +164,7 @@ def parse_kml(content, name):
         if c: pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": name})
     return pd.DataFrame(pts)
 
-# --- 5. SIDEBAR ---
+# --- 6. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Zarządzanie")
     
@@ -174,8 +186,6 @@ with st.sidebar:
                 if c2.button("🗑️", key=f"del_file_{f_name}"):
                     st.session_state['data'] = st.session_state['data'][st.session_state['data']['source_file'] != f_name].reset_index(drop=True)
                     st.rerun()
-            if st.button("🚨 USUŃ WSZYSTKO"):
-                st.session_state['data'] = pd.DataFrame(); st.rerun()
 
     with st.expander("🏠 Bazy", expanded=True):
         if st.session_state['saved_locations']:
@@ -192,14 +202,17 @@ with st.sidebar:
                         st.session_state.update({'meta_name': sel_b, 'meta_coords': get_lat_lng(addr)}); st.rerun()
                 with c3:
                     if st.button("🗑️", key=f"d_{sel_b}"):
-                        del st.session_state['saved_locations'][sel_b]; sync_save(); st.rerun()
+                        del st.session_state['saved_locations'][sel_b]
+                        sync_save()
+                        st.rerun()
         st.markdown("---")
         with st.form("new_b", clear_on_submit=True):
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("➕ Dodaj"):
                 if n and a: 
                     st.session_state['saved_locations'][n] = a
-                    sync_save(); st.rerun()
+                    sync_save() # Tutaj następuje zapis do Google
+                    st.rerun()
 
     with st.expander("📁 Projekty", expanded=True):
         p_name = st.text_input("Zapisz projekt jako:")
@@ -209,7 +222,8 @@ with st.sidebar:
                 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
                 'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
             }
-            sync_save(); st.rerun()
+            sync_save()
+            st.rerun()
         if st.session_state['projects']:
             st.markdown("---")
             sorted_projs = sorted(st.session_state['projects'].keys())
@@ -221,25 +235,20 @@ with st.sidebar:
                         st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
                 with col_del:
                     if st.button("🗑️", key=f"del_proj_{sel_p}"):
-                        del st.session_state['projects'][sel_p]; sync_save(); st.rerun()
+                        del st.session_state['projects'][sel_p]
+                        sync_save()
+                        st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
-# --- 6. PANEL GŁÓWNY ---
+# --- 7. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-c_start_box, c_meta_box = st.columns(2)
-with c_start_box:
+c1, c2 = st.columns(2)
+with c1:
     st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
-    if st.session_state['start_name'] != "Nie wybrano":
-        if st.button("✖", key="clear_start"):
-            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None, 'geometries': [], 'optimized_list': []}); st.rerun()
-
-with c_meta_box:
+with c2:
     st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
-    if st.session_state['meta_name'] != "Nie wybrano":
-        if st.button("✖", key="clear_meta"):
-            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None, 'geometries': [], 'optimized_list': []}); st.rerun()
 
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
@@ -293,22 +302,18 @@ if not st.session_state['data'].empty:
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
     
     st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
-
-    if visible_geoms:
-        st.markdown("### 📊 Wyniki")
-        total_d, total_t = sum(g['dist'] for g in visible_geoms), sum(g['time'] for g in visible_geoms)
-        st.info(f"🌍 ŁĄCZNIE: {total_d/1000:.2f} km | {int(total_t//3600)}h {int((total_t%3600)//60)}min")
-elif sc or mc:
-    st.info("📍 Wybrano punkt bazy. Wgraj pliki KML, aby zaplanować trasę.")
-    m = folium.Map()
-    pts = []
-    if sc:
-        folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='home', prefix='fa')).add_to(m)
-        pts.append([sc['lat'], sc['lng']])
-    if mc:
-        folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='flag', prefix='fa')).add_to(m)
-        pts.append([mc['lat'], mc['lng']])
-    if pts: m.fit_bounds(pts)
-    st_folium(m, width="100%", height=550)
 else:
-    st.info("👈 Wgraj KML i wybierz bazy w panelu bocznym.")
+    if sc or mc:
+        st.info("📍 Wybrano bazę. Wgraj KML, aby zobaczyć mapę.")
+        m = folium.Map()
+        pts = []
+        if sc: 
+            folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green')).add_to(m)
+            pts.append([sc['lat'], sc['lng']])
+        if mc: 
+            folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red')).add_to(m)
+            pts.append([mc['lat'], mc['lng']])
+        m.fit_bounds(pts)
+        st_folium(m, width="100%", height=550)
+    else:
+        st.info("👈 Wgraj KML i wybierz bazy.")
