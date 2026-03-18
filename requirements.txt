@@ -1,8 +1,9 @@
 streamlit
+extra-streamlit-components
+gspread
+oauth2client
 pandas
 folium
 streamlit-folium
 geopy
-gspread
-oauth2client
-extra-streamlit-components
+requests
