@@ -3,7 +3,7 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
-import re, math, json, requests, os, time
+import re, math, json, requests, os, time, zlib, base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -23,6 +23,22 @@ def get_gspread_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
+def compress_data(data_dict):
+    """Komprymuje słownik do krótkiego ciągu tekstowego."""
+    json_str = json.dumps(data_dict, ensure_ascii=False, separators=(',', ':'))
+    compressed = zlib.compress(json_str.encode('utf-8'))
+    return base64.b64encode(compressed).decode('utf-8')
+
+def decompress_data(compressed_str):
+    """Dekomprymuje ciąg tekstowy z powrotem do słownika."""
+    try:
+        decoded = base64.b64decode(compressed_str)
+        decompressed = zlib.decompress(decoded)
+        return json.loads(decompressed.decode('utf-8'))
+    except:
+        # Jeśli dane nie były skompresowane (stare wpisy), spróbuj wczytać jako zwykły JSON
+        return json.loads(compressed_str)
+
 def sync_save():
     if not SHEET_ID: return
     try:
@@ -34,11 +50,9 @@ def sync_save():
         loc_rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
             loc_rows.append([str(name), str(addr)])
-        
-        # NADPISYWANIE zamiast czyszczenia (bezpieczniejsze)
         loc_sheet.update(values=loc_rows, range_name='A1', value_input_option='RAW')
             
-        # --- Zapis PROJEKTÓW (Projects) ---
+        # --- Zapis PROJEKTÓW (Projects) z kompresją ---
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
@@ -47,19 +61,16 @@ def sync_save():
             if 'optimized_list' in serializable:
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
             
-            # Konwersja do JSON bez zbędnych spacji, by zaoszczędzić miejsce
-            json_data = json.dumps(serializable, ensure_ascii=False, separators=(',', ':'))
-            p_rows.append([str(p_name), json_data])
+            # KOMPRESJA: Zamiast json.dumps, używamy naszej funkcji
+            compressed_payload = compress_data(serializable)
+            p_rows.append([str(p_name), compressed_payload])
         
         proj_sheet = sheet.worksheet("Projects")
-        # WAŻNE: Najpierw aktualizujemy, nie czyścimy całego arkusza ręcznie
         proj_sheet.update(values=p_rows, range_name='A1', value_input_option='RAW')
         
         st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
     except Exception as e:
-        # Ten błąd nie zniknie sam, dopóki nie klikniesz [x]
-        st.error(f"⚠️ KRYTYCZNY BŁĄD SYNCHRONIZACJI: {str(e)}")
-        st.info("Sprawdź, czy w arkuszu Projects nagłówki nadal są w A1 i B1.")
+        st.error(f"⚠️ BŁĄD SYNCHRONIZACJI: {str(e)}")
 
 def sync_load():
     if not SHEET_ID: return
@@ -71,19 +82,20 @@ def sync_load():
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data if 'Nazwa' in row}
         
-        # Wczytanie PROJEKTÓW
+        # Wczytanie PROJEKTÓW z dekompresją
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded_projs = {}
         for row in proj_data:
             p_name, p_json = row.get('Nazwa Projektu'), row.get('Dane JSON')
             if p_name and p_json:
-                p_content = json.loads(p_json)
+                p_content = decompress_data(p_json) # DEKOMPRESJA
                 if 'data' in p_content: p_content['data'] = pd.DataFrame(p_content['data'])
                 if 'optimized_list' in p_content:
                     p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
                 loaded_projs[p_name] = p_content
         st.session_state['projects'] = loaded_projs
-    except: pass
+    except Exception as e:
+        print(f"Błąd ładowania: {e}")
 
 # --- 3. INICJALIZACJA SESJI ---
 for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
@@ -133,7 +145,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v112_geo")
+        gl = Nominatim(user_agent="v113_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
