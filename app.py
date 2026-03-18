@@ -198,7 +198,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 7. PANEL GŁÓWNY ---
-st.title("🗺️ Optymalizator Tras")
+st.title("🗺️ Optymalizator Tras") # Ostatnia sprawna wersja sprzed zmiany panelu bocznego.
 
 c1, c2 = st.columns(2)
 c1.info(f"🏠 **START:** {st.session_state['start_name']}")
