@@ -105,7 +105,6 @@ def sync_load():
     except: pass
 
 # --- 3. MODALE ---
-
 def execute_save(name):
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     st.session_state['projects'][name] = {
@@ -131,6 +130,7 @@ def modal_projects():
             if st.button("Wczytaj", use_container_width=True):
                 st.session_state.update(st.session_state['projects'][proj_list[sel]['name']])
                 st.session_state['last_loaded_project_name'] = proj_list[sel]['name']
+                st.session_state['map_bounds'] = None
                 st.rerun()
     with tab_save:
         n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
@@ -177,6 +177,7 @@ def modal_add_kml():
                 st.session_state['data'] = pd.concat([st.session_state['data'], df_new], ignore_index=True).drop_duplicates()
                 all_files = sorted(st.session_state['data']['source_file'].unique().tolist())
                 st.session_state['optimized_cache'][f.name] = optimize_route(df_new, st.session_state['start_coords'], st.session_state['meta_coords'], all_files.index(f.name))
+        st.session_state['map_bounds'] = None
         st.rerun()
 
 # --- 4. INICJALIZACJA ---
@@ -212,7 +213,7 @@ if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
 if c[2].button("🏠 Bazy", use_container_width=True): modal_bases()
 if c[3].button("🗑️ Wyczyść", use_container_width=True):
-    st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'last_loaded_project_name': ""})
+    st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'last_loaded_project_name': "", 'map_bounds': None})
     st.rerun()
 if c[4].button("🔓 Wyloguj", use_container_width=True):
     st.query_params.clear(); st.session_state.clear(); st.rerun()
@@ -227,12 +228,14 @@ with c1:
     if s_s != st.session_state['start_name']:
         st.session_state['start_name'] = s_s
         st.session_state['start_coords'] = get_lat_lng(st.session_state['saved_locations'][s_s]) if s_s != "---" else None
+        st.session_state['map_bounds'] = None
         st.rerun()
 with c2:
     m_s = st.selectbox("🏁 META:", ["---"] + bl, index=(bl.index(st.session_state['meta_name'])+1 if st.session_state['meta_name'] in bl else 0))
     if m_s != st.session_state['meta_name']:
         st.session_state['meta_name'] = m_s
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
+        st.session_state['map_bounds'] = None
         st.rerun()
 
 if not st.session_state['data'].empty:
@@ -246,7 +249,11 @@ if not st.session_state['data'].empty:
                 st.divider()
 
     with col_main:
-        show_pins = st.checkbox("Pokaż pinezki punktów", value=True)
+        ctrl1, ctrl2 = st.columns([1, 2])
+        show_pins = ctrl1.checkbox("Pokaż pinezki punktów", value=True)
+        # PRZYWRÓCONY TRYB WYŚWIETLANIA
+        mode = ctrl2.radio("Sposób wyświetlania:", ["Jedna trasa (dla wszystkich rejonów)", "Oddzielne trasy (dla każdego rejonu)"], horizontal=True, index=1)
+        
         m = folium.Map()
         active_bounds = []
         
@@ -272,7 +279,6 @@ if not st.session_state['data'].empty:
                     if show_pins:
                         pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                         for i, r in pts.iterrows():
-                            # HTML dla przycisku usuwania w Popup
                             del_html = f"""
                             <div style="font-family: sans-serif; min-width: 150px;">
                                 <b>{r['display_name']}</b><br>
@@ -286,32 +292,29 @@ if not st.session_state['data'].empty:
                             </div>
                             """
                             folium.Marker([r['lat'], r['lng']], 
-                                          icon=folium.Icon(color='blue' if i%2==0 else 'cadetblue', icon='info-sign'),
+                                          icon=folium.Icon(color='blue', icon='info-sign'),
                                           popup=folium.Popup(del_html)).add_to(m)
                             active_bounds.append([r['lat'], r['lng']])
 
-        # Obsługa usuwania punktu z Popup
-        map_res = st_folium(m, width="100%", height=600, returned_objects=["last_object_clicked_popup"])
+        curr_bounds = st.session_state.get('map_bounds')
+        if active_bounds and curr_bounds is None:
+            st.session_state['map_bounds'] = active_bounds
+            m.fit_bounds(active_bounds)
+        elif curr_bounds:
+            m.fit_bounds(curr_bounds)
+
+        map_res = st_folium(m, width="100%", height=600, key="main_map")
         
-        # Jeśli kliknięto usuń w popupie (przekazywane przez value przycisku)
         if map_res.get("last_object_clicked_popup"):
             val = map_res["last_object_clicked_popup"]
             if "|" in val:
                 plat, plng = map(float, val.split("|"))
-                # Usuwamy punkt z danych
                 idx = st.session_state['data'][(st.session_state['data']['lat'] == plat) & (st.session_state['data']['lng'] == plng)].index
                 if not idx.empty:
                     f_name = st.session_state['data'].loc[idx[0], 'source_file']
                     st.session_state['data'] = st.session_state['data'].drop(idx)
-                    # Wymuszamy przeliczenie trasy dla tego pliku
-                    if f_name in st.session_state['optimized_cache']:
-                        del st.session_state['optimized_cache'][f_name]
+                    if f_name in st.session_state['optimized_cache']: del st.session_state['optimized_cache'][f_name]
                     st.rerun()
-
-        # Zarządzanie widokiem (zoom)
-        if active_bounds and st.session_state['map_bounds'] is None:
-            st.session_state['map_bounds'] = active_bounds
-            st.rerun()
 
     if active_routes:
         st.markdown("### 📊 Szczegóły")
