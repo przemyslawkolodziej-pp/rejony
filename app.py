@@ -31,13 +31,10 @@ def compress_data(data_dict):
 def decompress_data(compressed_str):
     try:
         decoded = base64.b64decode(compressed_str)
-        decompressed = zlib.compressor().decompress(decoded) # Poprawka na decompress
+        decompressed = zlib.decompress(decoded)
         return json.loads(decompressed.decode('utf-8'))
     except:
-        try:
-            return json.loads(zlib.decompress(base64.b64decode(compressed_str)).decode('utf-8'))
-        except:
-            return json.loads(compressed_str)
+        return json.loads(compressed_str)
 
 def sync_save():
     if not SHEET_ID: return
@@ -74,11 +71,11 @@ def sync_load():
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # Wczytaj lokacje
+        # Lokacje
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {row['Nazwa']: row['Adres'] for row in loc_data if 'Nazwa' in row}
         
-        # Wczytaj projekty
+        # Projekty
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded_projs = {}
         for row in proj_data:
@@ -94,8 +91,7 @@ def sync_load():
         pass
 
 # --- 3. INICJALIZACJA SESJI ---
-keys = ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']
-for key in keys:
+for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'projects', 'start_coords', 'meta_coords', 'geometries', 'reset_counter']:
     if key not in st.session_state:
         if key == 'authenticated': st.session_state[key] = False
         elif key == 'data': st.session_state[key] = pd.DataFrame()
