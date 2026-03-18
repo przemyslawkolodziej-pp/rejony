@@ -12,6 +12,10 @@ SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE"
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
+COLOR_MAP = {
+    '#007bff': 'blue', '#28a745': 'green', '#6f42c1': 'purple', '#fd7e14': 'orange',
+    '#20c997': 'cadetblue', '#e83e8c': 'pink', '#dc3545': 'red', '#ffc107': 'lightgray'
+}
 
 st.markdown("""
     <style>
@@ -25,7 +29,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v206_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v208_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -105,19 +109,6 @@ def sync_load():
     except: pass
 
 # --- 3. MODALE ---
-def execute_save(name):
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    st.session_state['projects'][name] = {
-        'data': st.session_state['data'].copy(), 
-        'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-        'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-        'optimized_cache': st.session_state['optimized_cache'].copy(),
-        'last_modified': now_str
-    }
-    st.session_state['last_loaded_project_name'] = name
-    sync_save()
-    st.rerun()
-
 @st.dialog("Zarządzaj Projektami")
 def modal_projects():
     tab_open, tab_save, tab_delete = st.tabs(["📂 Otwórz", "💾 Zapisz", "🗑️ Usuń"])
@@ -135,30 +126,15 @@ def modal_projects():
     with tab_save:
         n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
         if n in st.session_state['projects']:
-            if st.button("Nadpisz projekt", type="primary", use_container_width=True): execute_save(n)
-        elif n:
-            if st.button("Zapisz projekt", use_container_width=True): execute_save(n)
-    with tab_delete:
-        if not proj_list: st.info("Brak projektów.")
-        else:
-            ds = st.selectbox("Usuń:", options=range(len(proj_list)), format_func=lambda x: proj_list[x]['label'], key="del_p")
-            if st.button("Usuń bezpowrotnie", use_container_width=True):
-                del st.session_state['projects'][proj_list[ds]['name']]
+            if st.button("Nadpisz projekt", type="primary", use_container_width=True): 
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
                 sync_save(); st.rerun()
-
-@st.dialog("Bazy")
-def modal_bases():
-    t1, t2 = st.tabs(["➕ Dodaj", "🗑️ Usuń"])
-    with t1:
-        n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-        if st.button("Dodaj", use_container_width=True) and n and a: 
-            st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
-    with t2:
-        if not st.session_state['saved_locations']: st.write("Brak baz.")
-        else:
-            sel = st.selectbox("Wybierz:", sorted(st.session_state['saved_locations'].keys()))
-            if st.button("Usuń", type="primary", use_container_width=True):
-                del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
+        elif n:
+            if st.button("Zapisz projekt", use_container_width=True):
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
+                sync_save(); st.rerun()
 
 @st.dialog("Dodaj KML")
 def modal_add_kml():
@@ -167,32 +143,29 @@ def modal_add_kml():
     up = st.file_uploader("KML", accept_multiple_files=True)
     if st.button("Oblicz", use_container_width=True) and up:
         for f in up:
+            content = f.read().decode('utf-8')
             pts = []
-            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', f.read().decode('utf-8'), re.DOTALL):
-                n = re.search(r'<(?:name|display_name)>(.*?)</', pm)
-                c = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
-                if c: pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": f.name})
+            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
+                name = re.search(r'<(?:name|display_name)>(.*?)</', pm)
+                coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
+                nr_rej = re.search(r'NR_REJONU[:\s]*</b>\s*(.*?)\s*<', pm) or re.search(r'NR_REJONU.*?>(.*?)<', pm)
+                pna = re.search(r'PNA_DORECZ[:\s]*</b>\s*(.*?)\s*<', pm) or re.search(r'PNA_DORECZ.*?>(.*?)<', pm)
+                if coords:
+                    pts.append({"display_name": name.group(1) if name else "Punkt", "lat": float(coords.group(2)), "lng": float(coords.group(1)), "source_file": f.name, "nr_rejonu": nr_rej.group(1) if nr_rej else "Brak", "pna_dorecz": pna.group(1) if pna else "Brak"})
             if pts:
                 df_new = pd.DataFrame(pts)
                 st.session_state['data'] = pd.concat([st.session_state['data'], df_new], ignore_index=True).drop_duplicates()
-                all_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-                st.session_state['optimized_cache'][f.name] = optimize_route(df_new, st.session_state['start_coords'], st.session_state['meta_coords'], all_files.index(f.name))
+                st.session_state['optimized_cache'][f.name] = optimize_route(df_new, st.session_state['start_coords'], st.session_state['meta_coords'], len(st.session_state['optimized_cache']))
         st.session_state['map_bounds'] = None
         st.rerun()
 
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
-    st.session_state.update({
-        'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 
-        'optimized_cache': {}, 'saved_locations': {}, 'projects': {}, 
-        'start_coords': None, 'meta_coords': None, 'start_name': "---", 'meta_name': "---",
-        'last_loaded_project_name': "", 'map_bounds': None
-    })
+    st.session_state.update({'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 'optimized_cache': {}, 'saved_locations': {}, 'projects': {}, 'start_coords': None, 'meta_coords': None, 'start_name': "---", 'meta_name': "---", 'last_loaded_project_name': "", 'map_bounds': None})
 
 def check_auth():
     if st.session_state.get('authenticated'): return True
-    p = st.query_params.get("token")
-    if p == hashlib.sha256(st.secrets.get("password", "").encode()).hexdigest():
+    if st.query_params.get("token") == hashlib.sha256(st.secrets.get("password", "").encode()).hexdigest():
         st.session_state['authenticated'] = True; return True
     return False
 
@@ -211,12 +184,22 @@ if not check_auth():
 c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
 if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
-if c[2].button("🏠 Bazy", use_container_width=True): modal_bases()
+if c[2].button("🏠 Bazy", use_container_width=True):
+    @st.dialog("Bazy")
+    def modal_bases():
+        t1, t2 = st.tabs(["➕ Dodaj", "🗑️ Usuń"])
+        with t1:
+            n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
+            if st.button("Dodaj", use_container_width=True) and n and a: st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
+        with t2:
+            if st.session_state['saved_locations']:
+                sel = st.selectbox("Wybierz:", sorted(st.session_state['saved_locations'].keys()))
+                if st.button("Usuń", type="primary", use_container_width=True): del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
+    modal_bases()
 if c[3].button("🗑️ Wyczyść", use_container_width=True):
     st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'last_loaded_project_name': "", 'map_bounds': None})
     st.rerun()
-if c[4].button("🔓 Wyloguj", use_container_width=True):
-    st.query_params.clear(); st.session_state.clear(); st.rerun()
+if c[4].button("🔓 Wyloguj", use_container_width=True): st.query_params.clear(); st.session_state.clear(); st.rerun()
 
 st.markdown("---")
 
@@ -228,15 +211,13 @@ with c1:
     if s_s != st.session_state['start_name']:
         st.session_state['start_name'] = s_s
         st.session_state['start_coords'] = get_lat_lng(st.session_state['saved_locations'][s_s]) if s_s != "---" else None
-        st.session_state['map_bounds'] = None
-        st.rerun()
+        st.session_state['map_bounds'] = None; st.rerun()
 with c2:
     m_s = st.selectbox("🏁 META:", ["---"] + bl, index=(bl.index(st.session_state['meta_name'])+1 if st.session_state['meta_name'] in bl else 0))
     if m_s != st.session_state['meta_name']:
         st.session_state['meta_name'] = m_s
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
-        st.session_state['map_bounds'] = None
-        st.rerun()
+        st.session_state['map_bounds'] = None; st.rerun()
 
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -251,12 +232,10 @@ if not st.session_state['data'].empty:
     with col_main:
         ctrl1, ctrl2 = st.columns([1, 2])
         show_pins = ctrl1.checkbox("Pokaż pinezki punktów", value=True)
-        # PRZYWRÓCONY TRYB WYŚWIETLANIA
-        mode = ctrl2.radio("Sposób wyświetlania:", ["Jedna trasa (dla wszystkich rejonów)", "Oddzielne trasy (dla każdego rejonu)"], horizontal=True, index=1)
+        mode = ctrl2.radio("Tryb:", ["Jedna trasa", "Oddzielne trasy"], horizontal=True, index=1)
         
         m = folium.Map()
         active_bounds = []
-        
         if st.session_state['start_coords']:
             folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
             active_bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
@@ -266,61 +245,41 @@ if not st.session_state['data'].empty:
             
         active_routes = {}
         for r_n in v_f:
-            if r_n in st.session_state['optimized_cache']:
-                cache = st.session_state['optimized_cache'][r_n]
-                if 'geom' not in cache or not cache['geom']:
-                    df_r = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
-                    cache = optimize_route(df_r, st.session_state['start_coords'], st.session_state['meta_coords'], all_rejs.index(r_n))
-                    st.session_state['optimized_cache'][r_n] = cache
-                
-                if cache:
-                    folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5, opacity=0.8).add_to(m)
-                    active_routes[r_n] = cache
-                    if show_pins:
-                        pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
-                        for i, r in pts.iterrows():
-                            del_html = f"""
-                            <div style="font-family: sans-serif; min-width: 150px;">
-                                <b>{r['display_name']}</b><br>
-                                <hr>
-                                <form method="post">
-                                    <button name="del_point" value="{r['lat']}|{r['lng']}" 
-                                    style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; width: 100%;">
-                                    USUŃ PUNKT
-                                    </button>
-                                </form>
-                            </div>
-                            """
-                            folium.Marker([r['lat'], r['lng']], 
-                                          icon=folium.Icon(color='blue', icon='info-sign'),
-                                          popup=folium.Popup(del_html)).add_to(m)
-                            active_bounds.append([r['lat'], r['lng']])
+            cache = st.session_state['optimized_cache'].get(r_n)
+            if cache:
+                folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5).add_to(m)
+                active_routes[r_n] = cache
+                if show_pins:
+                    f_color = COLOR_MAP.get(cache['color'], 'blue')
+                    pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
+                    for _, r in pts.iterrows():
+                        html = f"<div style='min-width:180px;'><b>{r['display_name']}</b><hr>REJON: {r['nr_rejonu']}<br>PNA: {r['pna_dorecz']}<hr><form method='post'><button name='del_point' value='{r['lat']}|{r['lng']}' style='background:#dc3545;color:white;border:none;width:100%;cursor:pointer;'>USUŃ PUNKT</button></form></div>"
+                        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html)).add_to(m)
+                        active_bounds.append([r['lat'], r['lng']])
 
-        curr_bounds = st.session_state.get('map_bounds')
-        if active_bounds and curr_bounds is None:
+        curr_b = st.session_state.get('map_bounds')
+        if active_bounds and curr_b is None:
             st.session_state['map_bounds'] = active_bounds
             m.fit_bounds(active_bounds)
-        elif curr_bounds:
-            m.fit_bounds(curr_bounds)
+        elif curr_b: m.fit_bounds(curr_b)
 
-        map_res = st_folium(m, width="100%", height=600, key="main_map")
-        
-        if map_res.get("last_object_clicked_popup"):
-            val = map_res["last_object_clicked_popup"]
+        res = st_folium(m, width="100%", height=600, key="main_map")
+        if res.get("last_object_clicked_popup"):
+            val = res["last_object_clicked_popup"]
             if "|" in val:
-                plat, plng = map(float, val.split("|"))
-                idx = st.session_state['data'][(st.session_state['data']['lat'] == plat) & (st.session_state['data']['lng'] == plng)].index
+                lat, lng = map(float, val.split("|"))
+                idx = st.session_state['data'][(st.session_state['data']['lat']==lat) & (st.session_state['data']['lng']==lng)].index
                 if not idx.empty:
-                    f_name = st.session_state['data'].loc[idx[0], 'source_file']
+                    f_n = st.session_state['data'].loc[idx[0], 'source_file']
                     st.session_state['data'] = st.session_state['data'].drop(idx)
-                    if f_name in st.session_state['optimized_cache']: del st.session_state['optimized_cache'][f_name]
+                    if f_n in st.session_state['optimized_cache']: del st.session_state['optimized_cache'][f_n]
                     st.rerun()
 
     if active_routes:
-        st.markdown("### 📊 Szczegóły")
-        cols = st.columns(min(len(active_routes), 3))
-        for idx, (name, data) in enumerate(active_routes.items()):
-            with cols[idx % 3]:
-                st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ {data["dist"]/1000:.2f} km | ⏱️ {int(data["time"]//60)} min</div></div>', unsafe_allow_html=True)
+        st.markdown("### 📊 Szczegóły i Harmonogram")
+        for name, data in active_routes.items():
+            st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ {data["dist"]/1000:.2f} km | ⏱️ {int(data["time"]//60)} min | 🧩 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
+            with st.expander(f"Pokaż kolejność dla {name}"):
+                st.table(data['df'][['display_name', 'lat', 'lng']])
 else:
     st.info("Wgraj pliki KML.")
