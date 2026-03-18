@@ -3,7 +3,7 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
-import re, math, json, requests, os, time, zlib, base64, hashlib
+import re, math, json, requests, os, time, zlib, base64, hashlib, datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -25,7 +25,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v203_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v205_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -67,15 +67,12 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_sh.update(values=[["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()], range_name='A1')
-        
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
-        
         for p_n, p_d in st.session_state['projects'].items():
             s = p_d.copy()
             if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
@@ -87,12 +84,10 @@ def sync_save():
                     if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): c_v['df'] = c_v['df'].to_dict()
                     clean_cache[k] = c_v
                 s['optimized_cache'] = clean_cache
-
             compressed = base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()
             if len(compressed) < 49000: p_rows.append([str(p_n), compressed])
-            
         p_sh.update(values=p_rows, range_name='A1')
-        st.toast("Zsynchronizowano z chmurą! ✅")
+        st.toast("Zsynchronizowano! ✅")
     except Exception as e: st.error(f"Błąd zapisu: {str(e)}")
 
 def sync_load():
@@ -101,7 +96,6 @@ def sync_load():
         sheet = client.open_by_key(SHEET_ID)
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {r['Nazwa']: r['Adres'] for r in loc_data if 'Nazwa' in r}
-        
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded = {}
         for r in proj_data:
@@ -117,54 +111,100 @@ def sync_load():
         st.session_state['projects'] = loaded
     except: pass
 
-# --- 3. MODALE (Z POPRAWIONYM ZAPISEM) ---
-@st.dialog("Otwórz projekt")
-def modal_open_project():
-    if not st.session_state['projects']:
-        st.write("Brak zapisanych projektów."); return
-    sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
-    if st.button("Wczytaj"):
-        st.session_state.update(st.session_state['projects'][sel])
-        st.session_state['last_loaded_project_name'] = sel
-        st.rerun()
-
-@st.dialog("Zapisz projekt")
-def modal_save_project():
-    current_name = st.session_state.get('last_loaded_project_name', "")
-    n = st.text_input("Wprowadź nazwę projektu:", value=current_name)
-    
-    if not n:
-        st.warning("Podaj nazwę projektu.")
-        return
-
-    exists = n in st.session_state['projects']
-
-    if exists:
-        st.error(f"⚠️ Projekt o nazwie '{n}' już istnieje!")
-        if st.button("Tak, nadpisz istniejący projekt", type="primary"):
-            execute_save(n)
-    else:
-        if st.button("Zapisz jako nowy projekt"):
-            execute_save(n)
+# --- 3. MODALE ---
 
 def execute_save(name):
+    # Dodajemy aktualny czas zapisu
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     st.session_state['projects'][name] = {
         'data': st.session_state['data'].copy(), 
         'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
         'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-        'optimized_cache': st.session_state['optimized_cache'].copy()
+        'optimized_cache': st.session_state['optimized_cache'].copy(),
+        'last_modified': now_str
     }
     st.session_state['last_loaded_project_name'] = name
     sync_save()
     st.rerun()
 
-@st.dialog("Wczytaj i przelicz optymalne trasy")
+@st.dialog("Zarządzaj Projektami")
+def modal_projects():
+    tab_open, tab_save, tab_delete = st.tabs(["📂 Otwórz", "💾 Zapisz", "🗑️ Usuń"])
+    
+    # Przygotowanie listy z datami dla selectboxów
+    proj_list = []
+    for p_n, p_d in st.session_state['projects'].items():
+        m_date = p_d.get('last_modified', "Brak daty")
+        proj_list.append({"name": p_n, "label": f"{p_n} (zapisano: {m_date})"})
+    proj_list = sorted(proj_list, key=lambda x: x['name'])
+    
+    with tab_open:
+        if not proj_list:
+            st.info("Brak zapisanych projektów.")
+        else:
+            sel_idx = st.selectbox("Wybierz projekt do wczytania:", 
+                                   options=range(len(proj_list)), 
+                                   format_func=lambda x: proj_list[x]['label'])
+            sel_name = proj_list[sel_idx]['name']
+            if st.button("Wczytaj projekt", use_container_width=True):
+                st.session_state.update(st.session_state['projects'][sel_name])
+                st.session_state['last_loaded_project_name'] = sel_name
+                st.rerun()
+                
+    with tab_save:
+        curr_n = st.session_state.get('last_loaded_project_name', "")
+        n = st.text_input("Nazwa projektu:", value=curr_n)
+        if n:
+            if n in st.session_state['projects']:
+                st.warning(f"Projekt '{n}' już istnieje. Zostanie nadpisany.")
+                if st.button("Potwierdź nadpisanie", type="primary", use_container_width=True):
+                    execute_save(n)
+            else:
+                if st.button("Zapisz projekt", use_container_width=True):
+                    execute_save(n)
+        else:
+            st.caption("Wpisz nazwę, aby odblokować zapis.")
+
+    with tab_delete:
+        if not proj_list:
+            st.info("Brak projektów.")
+        else:
+            del_idx = st.selectbox("Wybierz projekt do usunięcia:", 
+                                   options=range(len(proj_list)), 
+                                   format_func=lambda x: proj_list[x]['label'],
+                                   key="del_proj_idx")
+            del_name = proj_list[del_idx]['name']
+            st.error(f"Czy na pewno chcesz trwale usunąć projekt '{del_name}'?")
+            if st.button("Tak, usuń bezpowrotnie", use_container_width=True):
+                if del_name == st.session_state.get('last_loaded_project_name'):
+                    st.session_state['last_loaded_project_name'] = ""
+                del st.session_state['projects'][del_name]
+                sync_save()
+                st.rerun()
+
+@st.dialog("Bazy")
+def modal_bases():
+    tab1, tab2 = st.tabs(["➕ Dodaj bazę", "🗑️ Usuń bazę"])
+    with tab1:
+        n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
+        if st.button("Dodaj do listy", use_container_width=True):
+            if n and a: 
+                st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
+    with tab2:
+        if not st.session_state['saved_locations']: st.write("Brak baz."); return
+        sel = st.selectbox("Wybierz bazę:", sorted(st.session_state['saved_locations'].keys()))
+        if st.button("Usuń bazę", type="primary", use_container_width=True):
+            if sel == st.session_state['start_name']: st.session_state['start_name'], st.session_state['start_coords'] = "---", None
+            if sel == st.session_state['meta_name']: st.session_state['meta_name'], st.session_state['meta_coords'] = "---", None
+            del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
+
+@st.dialog("Dodaj Rejony (KML)")
 def modal_add_kml():
     if st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---":
-        st.error("⚠️ Najpierw wybierz START i METĘ!"); return
-    up = st.file_uploader("Wybierz pliki KML", type=['kml'], accept_multiple_files=True)
-    if st.button("Wczytaj i Oblicz") and up:
-        with st.spinner("Przeliczanie..."):
+        st.error("⚠️ Wybierz najpierw START i METĘ na stronie głównej!"); return
+    up = st.file_uploader("Wgraj pliki KML", type=['kml'], accept_multiple_files=True)
+    if st.button("Oblicz Optymalne Trasy", use_container_width=True) and up:
+        with st.spinner("Trwa optymalizacja..."):
             for f in up:
                 content = f.read().decode('utf-8')
                 pts = []
@@ -179,28 +219,12 @@ def modal_add_kml():
                     st.session_state['optimized_cache'][f.name] = optimize_route(df_new, st.session_state['start_coords'], st.session_state['meta_coords'], all_files.index(f.name))
         st.rerun()
 
-@st.dialog("Bazy")
-def modal_bases():
-    tab1, tab2 = st.tabs(["Dodaj bazę", "Usuń bazę"])
-    with tab1:
-        n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-        if st.button("Dodaj bazę"):
-            if n and a: 
-                st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
-    with tab2:
-        if not st.session_state['saved_locations']: st.write("Brak baz."); return
-        sel = st.selectbox("Wybierz bazę do usunięcia:", sorted(st.session_state['saved_locations'].keys()))
-        if st.button("Usuń wybraną"):
-            if sel == st.session_state['start_name']: st.session_state['start_name'], st.session_state['start_coords'] = "---", None
-            if sel == st.session_state['meta_name']: st.session_state['meta_name'], st.session_state['meta_coords'] = "---", None
-            del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
-
-@st.dialog("Usuń KML")
+@st.dialog("Usuń Rejony")
 def modal_remove_kml():
-    if st.session_state['data'].empty: st.write("Brak plików."); return
+    if st.session_state['data'].empty: st.write("Brak wgranych rejonów."); return
     u_f = sorted(st.session_state['data']['source_file'].unique().tolist())
-    to_del = st.multiselect("Pliki do usunięcia:", u_f)
-    if st.button("Usuń zaznaczone"):
+    to_del = st.multiselect("Wybierz rejony do usunięcia:", u_f)
+    if st.button("Usuń wybrane", use_container_width=True):
         st.session_state['data'] = st.session_state['data'][~st.session_state['data']['source_file'].isin(to_del)]
         for f in to_del:
             if f in st.session_state['optimized_cache']: del st.session_state['optimized_cache'][f]
@@ -225,19 +249,17 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA ---
+# --- 5. PASEK NAWIGACJI ---
 with st.container():
-    c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
-    if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
-    if c[1].button("💾 Zapisz", use_container_width=True): modal_save_project()
-    if c[2].button("➕ Zapisz jako Nowy", use_container_width=True): modal_save_project()
-    if c[3].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
-    if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
-    if c[5].button("🏠 Bazy", use_container_width=True): modal_bases()
-    if c[6].button("🗑️ Wyczyść", use_container_width=True):
+    c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
+    if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
+    if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
+    if c[2].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
+    if c[3].button("🏠 Bazy", use_container_width=True): modal_bases()
+    if c[4].button("🗑️ Wyczyść", use_container_width=True):
         st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'last_loaded_project_name': ""})
         st.rerun()
-    if c[7].button("🔓 Wyloguj", use_container_width=True):
+    if c[5].button("🔓 Wyloguj", use_container_width=True):
         st.query_params.clear(); st.session_state.clear(); st.rerun()
 
 st.markdown("---")
@@ -312,4 +334,4 @@ if not st.session_state['data'].empty:
             with cols[idx % 3]:
                 st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ Dystans: {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ Czas: {int(data["time"]//60)} min</div></div>', unsafe_allow_html=True)
 else:
-    st.info("Wgraj pliki KML.")
+    st.info("Wgraj pliki KML, aby rozpocząć.")
