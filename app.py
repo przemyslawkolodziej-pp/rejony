@@ -111,55 +111,62 @@ if not check_password(): st.stop()
 # --- 4. STYLE CSS ---
 st.markdown("""
 <style>
-    div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; }
-    
+    /* Globalne style przycisków */
+    div.stButton > button { height: 40px; border-radius: 8px; }
+    button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
+
+    /* KONTENER DLA PASKA I PRZYCISKU */
+    .row-container {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 48px;
+        margin-bottom: 10px;
+    }
+
+    /* PASEK INFORMACYJNY */
     .base-info-box { 
         background-color: #f0f2f6; 
-        padding: 0 15px; 
+        padding: 0 55px 0 15px; /* Duży padding z prawej na przycisk */
         border-radius: 10px; 
         border-left: 5px solid #28a745; 
         font-size: 14px; 
-        height: 45px; 
+        height: 48px; 
         display: flex; 
         align-items: center; 
+        width: 100%;
+        box-sizing: border-box;
         white-space: nowrap; 
         overflow: hidden; 
         text-overflow: ellipsis;
-        box-sizing: border-box;
     }
 
-    button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    
-    /* IDEALNE WYRÓWNANIE PRZYCISKU X */
-    .x-btn-container {
-        height: 45px; /* Taka sama wysokość jak pasek obok */
-        display: flex;
-        align-items: center; /* Wyśrodkowanie w pionie */
-        justify-content: flex-start;
+    /* PRZYCISK X POZYCJONOWANY WEWNĄTRZ */
+    .x-overlay {
+        position: absolute;
+        right: 5px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 10;
     }
 
-    /* Usuwamy marginesy górne, które Streamlit dodaje automatycznie do kontenerów przycisków */
-    div[data-testid="stColumn"] > div > div > div > div {
-        padding-top: 0px !important;
-    }
-
-    .x-btn-container button {
+    .x-overlay button {
         background-color: #ffffff !important;
         color: #31333f !important;
         border: 1px solid #dcdde1 !important;
-        width: 45px !important;
-        height: 45px !important;
-        min-width: 45px !important;
-        border-radius: 10px !important;
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        border-radius: 8px !important;
         padding: 0px !important;
-        margin: 0px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        line-height: 1 !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
 
-    .x-btn-container button:hover {
+    .x-overlay button:hover {
         border-color: #ff4b4b !important;
         color: #ff4b4b !important;
         background-color: #fff1f1 !important;
@@ -179,7 +186,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v120_geo")
+        gl = Nominatim(user_agent="v121_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -292,29 +299,30 @@ st.title("🗺️ Optymalizator Tras")
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    sub_c1, sub_c2 = st.columns([0.84, 0.16], gap="small")
-    sub_c1.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="row-container">', unsafe_allow_html=True)
+    st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
-        with sub_c2:
-            st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
-            if st.button("✖", key="clear_s"):
-                st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="x-overlay">', unsafe_allow_html=True)
+        if st.button("✖", key="clear_s"):
+            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main_2:
-    sub_c1, sub_c2 = st.columns([0.84, 0.16], gap="small")
-    sub_c1.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="row-container">', unsafe_allow_html=True)
+    st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
-        with sub_c2:
-            st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
-            if st.button("✖", key="clear_m"):
-                st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="x-overlay">', unsafe_allow_html=True)
+        if st.button("✖", key="clear_m"):
+            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ... (reszta kodu bez zmian) ...
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty:
