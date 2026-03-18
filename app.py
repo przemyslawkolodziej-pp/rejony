@@ -42,14 +42,17 @@ def sync_save():
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # Bazy
+        # --- Zapis BAZ ---
         loc_sheet = sheet.worksheet("SavedLocations")
+        loc_sheet.clear() # Czyścimy, żeby stare dane nie zostały pod spodem
         loc_rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
             loc_rows.append([str(name), str(addr)])
         loc_sheet.update(values=loc_rows, range_name='A1')
         
-        # Projekty
+        # --- Zapis PROJEKTÓW ---
+        proj_sheet = sheet.worksheet("Projects")
+        proj_sheet.clear() # KLUCZOWE: Czyścimy przed zapisem nowej listy
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
@@ -59,7 +62,6 @@ def sync_save():
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
             p_rows.append([str(p_name), compress_data(serializable)])
         
-        proj_sheet = sheet.worksheet("Projects")
         proj_sheet.update(values=p_rows, range_name='A1')
         st.toast("Zsynchronizowano! ✅")
     except Exception as e:
@@ -102,20 +104,19 @@ for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'proje
 
 if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
-def check_password():
-    if st.session_state['authenticated']: return True
+# --- LOGOWANIE ---
+if not st.session_state['authenticated']:
     st.title("🔐 Logowanie")
     with st.form("login"):
         p = st.text_input("Hasło:", type="password")
         if st.form_submit_button("Zaloguj"):
             if "password" in st.secrets and p == st.secrets["password"]:
                 st.session_state['authenticated'] = True
-                sync_load() # AUTOMATYCZNE WCZYTANIE PO LOGOWANIU
+                sync_load() # Wczytujemy dane od razu po zalogowaniu
                 st.rerun()
-            else: st.error("❌ Błędne hasło")
-    return False
-
-if not check_password(): st.stop()
+            else:
+                st.error("❌ Błędne hasło")
+    st.stop()
 
 # --- 4. STYLE CSS ---
 st.markdown("""
@@ -132,7 +133,7 @@ def get_folium_color(idx):
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v114_geo")
+        gl = Nominatim(user_agent="v115_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -220,7 +221,7 @@ with st.sidebar:
                 if c1.button("📂 Otwórz"): st.session_state.update(st.session_state['projects'][sel_p]); st.rerun()
                 if c2.button("🗑️", key=f"del_proj_{sel_p}"):
                     del st.session_state['projects'][sel_p]
-                    sync_save(); st.rerun() # NAPRAWIONE USUWANIE Z SHEET
+                    sync_save(); st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
@@ -268,6 +269,7 @@ if not st.session_state['data'].empty:
                     route.append({"lat": mc['lat'], "lng": mc['lng'], "display_name": "META"})
                     geom, d, t = get_route_chunked([[r['lat'], r['lng']] for r in route])
                     st.session_state['optimized_list'].append(pd.DataFrame(route))
+                    # Ujednolicona nazwa klucza 'pts'
                     st.session_state['geometries'].append({"geom": geom, "color": color, "dist": d, "time": t, "name": group['source_file'].iloc[0] if mode != "Jedna trasa" else "Całość", "pts": len(group)})
                 st.rerun()
 
@@ -294,7 +296,6 @@ if not st.session_state['data'].empty:
     if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
     
-    # --- PRZYWRÓCONE SZCZEGÓŁY REJONÓW ---
     if st.session_state['geometries']:
         st.markdown("### 📊 Szczegóły tras")
         total_d, total_t = 0, 0
