@@ -112,17 +112,47 @@ if not check_password(): st.stop()
 st.markdown("""
 <style>
     div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; }
-    .base-info-box { background-color: #f0f2f6; padding: 10px 15px; border-radius: 10px; border-left: 5px solid #28a745; font-size: 14px; height: 45px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    
+    /* Boxy informacyjne */
+    .base-info-box { 
+        background-color: #f0f2f6; 
+        padding: 0 15px; 
+        border-radius: 10px; 
+        border-left: 5px solid #28a745; 
+        font-size: 14px; 
+        height: 45px; 
+        display: flex; 
+        align-items: center; 
+        white-space: nowrap; 
+        overflow: hidden; 
+        text-overflow: ellipsis;
+        margin-bottom: 5px;
+    }
+
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
     
-    /* Wymuszenie ułożenia przycisku X obok paska */
-    [data-testid="column"] .x-btn-container button {
-        background-color: #ff4b4b !important;
-        color: white !important;
+    /* Naprawa przycisku X - usuwamy domyślne marginesy Streamlita i centrujemy ikonę */
+    div.x-btn-container > div[data-testid="stVerticalBlock"] > div {
+        padding: 0px !important;
+        margin: 0px !important;
+    }
+
+    .x-btn-container button {
+        background-color: transparent !important;
+        color: #31333f !important;
+        border: 1px solid #dcdde1 !important;
         width: 45px !important;
         height: 45px !important;
+        min-width: 45px !important;
         border-radius: 10px !important;
-        margin-top: 0px !important;
+        padding: 0px !important;
+        margin: 0px !important;
+        line-height: 45px !important;
+    }
+
+    .x-btn-container button:hover {
+        border-color: #ff4b4b !important;
+        color: #ff4b4b !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -139,7 +169,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v116_geo")
+        gl = Nominatim(user_agent="v117_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -252,11 +282,11 @@ st.title("🗺️ Optymalizator Tras")
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    # Zastosowanie proporcji zapobiegających przeskakiwaniu
-    c_text, c_btn = st.columns([0.82, 0.18], gap="small")
-    c_text.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    # Gap="none" redukuje domyślne przerwy między kolumnami
+    sub_c1, sub_c2 = st.columns([0.88, 0.12], gap="none")
+    sub_c1.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
-        with c_btn:
+        with sub_c2:
             st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
             if st.button("✖", key="clear_s"):
                 st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
@@ -264,10 +294,10 @@ with col_main_1:
             st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main_2:
-    c_text, c_btn = st.columns([0.82, 0.18], gap="small")
-    c_text.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    sub_c1, sub_c2 = st.columns([0.88, 0.12], gap="none")
+    sub_c1.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
-        with c_btn:
+        with sub_c2:
             st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
             if st.button("✖", key="clear_m"):
                 st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
