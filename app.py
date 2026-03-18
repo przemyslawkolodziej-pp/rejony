@@ -19,14 +19,13 @@ st.markdown("""
         .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 8px solid; }
         .metric-title { font-weight: bold; color: #495057; margin-bottom: 8px; font-size: 1.1rem; }
         .metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; color: #333; font-weight: 500; }
-        .metric-icon { width: 20px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v202_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v203_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -79,31 +78,22 @@ def sync_save():
         
         for p_n, p_d in st.session_state['projects'].items():
             s = p_d.copy()
-            if isinstance(s.get('data'), pd.DataFrame): 
-                s['data'] = s['data'].to_dict()
-            
+            if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
             if 'optimized_cache' in s:
                 clean_cache = {}
                 for k, v in s['optimized_cache'].items():
                     c_v = v.copy()
                     if 'geom' in c_v: del c_v['geom']
-                    if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): 
-                        c_v['df'] = c_v['df'].to_dict()
+                    if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): c_v['df'] = c_v['df'].to_dict()
                     clean_cache[k] = c_v
                 s['optimized_cache'] = clean_cache
 
-            json_str = json.dumps(s)
-            compressed = base64.b64encode(zlib.compress(json_str.encode())).decode()
-            
-            if len(compressed) > 49000:
-                st.error(f"⚠️ Projekt '{p_n}' jest za duży!")
-                continue
-            p_rows.append([str(p_n), compressed])
+            compressed = base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()
+            if len(compressed) < 49000: p_rows.append([str(p_n), compressed])
             
         p_sh.update(values=p_rows, range_name='A1')
-        st.toast("Zsynchronizowano! ✅")
-    except Exception as e: 
-        st.error(f"Błąd zapisu: {str(e)}")
+        st.toast("Zsynchronizowano z chmurą! ✅")
+    except Exception as e: st.error(f"Błąd zapisu: {str(e)}")
 
 def sync_load():
     try:
@@ -118,8 +108,7 @@ def sync_load():
             p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
             if p_n and p_j:
                 try:
-                    decompressed = zlib.decompress(base64.b64decode(p_j))
-                    c = json.loads(decompressed)
+                    c = json.loads(zlib.decompress(base64.b64decode(p_j)))
                     if 'data' in c: c['data'] = pd.DataFrame(c['data'])
                     if 'optimized_cache' in c:
                         c['optimized_cache'] = {k: {**v, 'df': pd.DataFrame(v['df'])} for k, v in c['optimized_cache'].items()}
@@ -128,31 +117,51 @@ def sync_load():
         st.session_state['projects'] = loaded
     except: pass
 
-# --- 3. MODALE ---
+# --- 3. MODALE (Z POPRAWIONYM ZAPISEM) ---
 @st.dialog("Otwórz projekt")
 def modal_open_project():
     if not st.session_state['projects']:
-        st.write("Brak projektów."); return
+        st.write("Brak zapisanych projektów."); return
     sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
     if st.button("Wczytaj"):
-        st.session_state.update(st.session_state['projects'][sel]); st.rerun()
+        st.session_state.update(st.session_state['projects'][sel])
+        st.session_state['last_loaded_project_name'] = sel
+        st.rerun()
 
 @st.dialog("Zapisz projekt")
 def modal_save_project():
-    n = st.text_input("Nazwa projektu:", value=f"Projekt {time.strftime('%H:%M:%S')}")
-    if st.button("Zapisz") and n:
-        st.session_state['projects'][n] = {
-            'data': st.session_state['data'].copy(), 
-            'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-            'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-            'optimized_cache': st.session_state['optimized_cache'].copy()
-        }
-        sync_save(); st.rerun()
+    current_name = st.session_state.get('last_loaded_project_name', "")
+    n = st.text_input("Wprowadź nazwę projektu:", value=current_name)
+    
+    if not n:
+        st.warning("Podaj nazwę projektu.")
+        return
+
+    exists = n in st.session_state['projects']
+
+    if exists:
+        st.error(f"⚠️ Projekt o nazwie '{n}' już istnieje!")
+        if st.button("Tak, nadpisz istniejący projekt", type="primary"):
+            execute_save(n)
+    else:
+        if st.button("Zapisz jako nowy projekt"):
+            execute_save(n)
+
+def execute_save(name):
+    st.session_state['projects'][name] = {
+        'data': st.session_state['data'].copy(), 
+        'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
+        'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
+        'optimized_cache': st.session_state['optimized_cache'].copy()
+    }
+    st.session_state['last_loaded_project_name'] = name
+    sync_save()
+    st.rerun()
 
 @st.dialog("Wczytaj i przelicz optymalne trasy")
 def modal_add_kml():
     if st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---":
-        st.error("⚠️ Wybierz START i METĘ!"); return
+        st.error("⚠️ Najpierw wybierz START i METĘ!"); return
     up = st.file_uploader("Wybierz pliki KML", type=['kml'], accept_multiple_files=True)
     if st.button("Wczytaj i Oblicz") and up:
         with st.spinner("Przeliczanie..."):
@@ -182,12 +191,9 @@ def modal_bases():
         if not st.session_state['saved_locations']: st.write("Brak baz."); return
         sel = st.selectbox("Wybierz bazę do usunięcia:", sorted(st.session_state['saved_locations'].keys()))
         if st.button("Usuń wybraną"):
-            if sel == st.session_state['start_name']:
-                st.session_state['start_name'], st.session_state['start_coords'] = "---", None
-            if sel == st.session_state['meta_name']:
-                st.session_state['meta_name'], st.session_state['meta_coords'] = "---", None
-            del st.session_state['saved_locations'][sel]
-            sync_save(); st.rerun()
+            if sel == st.session_state['start_name']: st.session_state['start_name'], st.session_state['start_coords'] = "---", None
+            if sel == st.session_state['meta_name']: st.session_state['meta_name'], st.session_state['meta_coords'] = "---", None
+            del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
 
 @st.dialog("Usuń KML")
 def modal_remove_kml():
@@ -202,7 +208,12 @@ def modal_remove_kml():
 
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
-    st.session_state.update({'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 'optimized_cache': {}, 'saved_locations': {}, 'projects': {}, 'start_coords': None, 'meta_coords': None, 'start_name': "---", 'meta_name': "---"})
+    st.session_state.update({
+        'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 
+        'optimized_cache': {}, 'saved_locations': {}, 'projects': {}, 
+        'start_coords': None, 'meta_coords': None, 'start_name': "---", 'meta_name': "---",
+        'last_loaded_project_name': ""
+    })
 if check_auth() and not st.session_state['projects']: sync_load()
 if not check_auth():
     st.title("🔐 Logowanie")
@@ -224,7 +235,7 @@ with st.container():
     if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
     if c[5].button("🏠 Bazy", use_container_width=True): modal_bases()
     if c[6].button("🗑️ Wyczyść", use_container_width=True):
-        st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None})
+        st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'last_loaded_project_name': ""})
         st.rerun()
     if c[7].button("🔓 Wyloguj", use_container_width=True):
         st.query_params.clear(); st.session_state.clear(); st.rerun()
@@ -252,7 +263,6 @@ with c2:
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
     col_list, col_main = st.columns([1, 3.5])
-    
     with col_list:
         st.write("### 📍 Rejony")
         v_f = []
@@ -260,7 +270,6 @@ if not st.session_state['data'].empty:
             for r_n in all_rejs:
                 if st.checkbox(r_n, value=True, key=f"chk_{r_n}"): v_f.append(r_n)
                 st.divider()
-
     with col_main:
         ctrl1, ctrl2 = st.columns([1, 2])
         show_pins = ctrl1.checkbox("Pokaż pinezki punktów", value=True)
@@ -303,4 +312,4 @@ if not st.session_state['data'].empty:
             with cols[idx % 3]:
                 st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ Dystans: {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ Czas: {int(data["time"]//60)} min</div></div>', unsafe_allow_html=True)
 else:
-    st.info("Wgraj KML.")
+    st.info("Wgraj pliki KML.")
