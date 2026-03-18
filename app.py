@@ -41,11 +41,15 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
+        
+        # Zapis BAZ
         loc_sheet = sheet.worksheet("SavedLocations")
         loc_rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
             loc_rows.append([str(name), str(addr)])
         loc_sheet.update(values=loc_rows, range_name='A1', value_input_option='RAW')
+            
+        # Zapis PROJEKTÓW
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
@@ -55,6 +59,7 @@ def sync_save():
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
             compressed_payload = compress_data(serializable)
             p_rows.append([str(p_name), compressed_payload])
+        
         proj_sheet = sheet.worksheet("Projects")
         proj_sheet.update(values=p_rows, range_name='A1', value_input_option='RAW')
         st.toast("Zsynchronizowano! ✅", icon="☁️")
@@ -111,19 +116,9 @@ if not check_password(): st.stop()
 # --- 4. STYLE CSS ---
 st.markdown("""
 <style>
-    div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; }
-    .base-info-box { background-color: #f0f2f6; padding: 10px 15px; border-radius: 10px; border-left: 5px solid #28a745; font-size: 14px; height: 45px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    div.stButton > button { height: 40px; width: 100%; font-size: 18px !important; border-radius: 8px; margin-bottom: 5px; padding: 0px !important; display: flex; align-items: center; justify-content: center; }
+    .base-info-box { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 5px; font-size: 15px; }
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
-    
-    /* Wymuszenie ułożenia przycisku X obok paska */
-    [data-testid="column"] .x-btn-container button {
-        background-color: #ff4b4b !important;
-        color: white !important;
-        width: 45px !important;
-        height: 45px !important;
-        border-radius: 10px !important;
-        margin-top: 0px !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -139,7 +134,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v116_geo")
+        gl = Nominatim(user_agent="v114_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -249,32 +244,19 @@ with st.sidebar:
 # --- 7. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-col_main_1, col_main_2 = st.columns(2)
-
-with col_main_1:
-    # Zastosowanie proporcji zapobiegających przeskakiwaniu
-    c_text, c_btn = st.columns([0.82, 0.18], gap="small")
-    c_text.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
-        with c_btn:
-            st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
-            if st.button("✖", key="clear_s"):
-                st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-with col_main_2:
-    c_text, c_btn = st.columns([0.82, 0.18], gap="small")
-    c_text.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+        if st.button("✖ Wyczyść Start", key="clear_s"):
+            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
+            st.rerun()
+with c2:
+    st.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
-        with c_btn:
-            st.markdown('<div class="x-btn-container">', unsafe_allow_html=True)
-            if st.button("✖", key="clear_m"):
-                st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("✖ Wyczyść Metę", key="clear_m"):
+            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
+            st.rerun()
 
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
@@ -289,6 +271,7 @@ if not st.session_state['data'].empty:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
+    # --- NOWE PRZYCISKI ---
     col_calc, col_reset = st.columns([4, 1])
     with col_calc:
         if st.button("OBLICZ TRASY", type="primary", use_container_width=True):
