@@ -125,17 +125,26 @@ st.markdown("""
         white-space: nowrap; 
         overflow: hidden; 
         text-overflow: ellipsis;
+        box-sizing: border-box;
     }
 
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
     
-    /* Naprawa przycisku X */
+    /* IDEALNE WYRÓWNANIE PRZYCISKU X */
     .x-btn-container {
-        margin-left: -15px; /* Przysunięcie przycisku do paska */
+        height: 45px; /* Taka sama wysokość jak pasek obok */
+        display: flex;
+        align-items: center; /* Wyśrodkowanie w pionie */
+        justify-content: flex-start;
+    }
+
+    /* Usuwamy marginesy górne, które Streamlit dodaje automatycznie do kontenerów przycisków */
+    div[data-testid="stColumn"] > div > div > div > div {
+        padding-top: 0px !important;
     }
 
     .x-btn-container button {
-        background-color: transparent !important;
+        background-color: #ffffff !important;
         color: #31333f !important;
         border: 1px solid #dcdde1 !important;
         width: 45px !important;
@@ -144,22 +153,16 @@ st.markdown("""
         border-radius: 10px !important;
         padding: 0px !important;
         margin: 0px !important;
-        line-height: 45px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        line-height: 1 !important;
     }
 
     .x-btn-container button:hover {
         border-color: #ff4b4b !important;
         color: #ff4b4b !important;
-    }
-
-    /* Wyśrodkowanie ikony kosza w sidebarze */
-    div[data-testid="column"] button {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        background-color: #fff1f1 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -176,7 +179,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v118_geo")
+        gl = Nominatim(user_agent="v120_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -289,7 +292,7 @@ st.title("🗺️ Optymalizator Tras")
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    sub_c1, sub_c2 = st.columns([0.85, 0.15], gap="small")
+    sub_c1, sub_c2 = st.columns([0.84, 0.16], gap="small")
     sub_c1.markdown(f'<div class="base-info-box">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
         with sub_c2:
@@ -300,7 +303,7 @@ with col_main_1:
             st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main_2:
-    sub_c1, sub_c2 = st.columns([0.85, 0.15], gap="small")
+    sub_c1, sub_c2 = st.columns([0.84, 0.16], gap="small")
     sub_c1.markdown(f'<div class="base-info-box">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
         with sub_c2:
