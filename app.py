@@ -13,63 +13,37 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# --- NAJBARDZIEJ AGRESYWNY CSS JAKI MOŻNA ZASTOSOWAĆ ---
-st.markdown(f"""
+# --- TYLKO EDYCJA PRZYCISKU OPTYMALIZACJI ---
+st.markdown("""
     <style>
-        /* Globalne zaokrąglenia */
-        .stButton>button {{ border-radius: 8px; }}
-
-        /* 1. Przycisk OPTYMALIZACJA (Aktywny) */
-        button[kind="primary"] {{
+        .stButton>button { border-radius: 8px; }
+        
+        /* Przycisk Primary (Optymalizacja) gdy jest AKTYWNY */
+        div.stButton > button[kind="primary"] {
             background-color: #007bff !important;
             color: white !important;
             border: none !important;
-        }}
+        }
 
-        /* 2. Przycisk OPTYMALIZACJA (Nieaktywny - WYRAŹNY) */
-        button[disabled] {{
+        /* Przycisk Primary gdy jest ZABLOKOWANY (Start/Meta nie wybrane) */
+        div.stButton > button[disabled] {
             background-color: #f0f2f6 !important;
-            color: #555555 !important;
+            color: #6c757d !important;
             border: 1px solid #dcdcdc !important;
             opacity: 1 !important;
-            cursor: not-allowed !important;
-        }}
+        }
 
-        /* 3. MULTISELECT - NAPRAWA (Usunięcie tła pod tekstem) */
-        div[data-baseweb="tag"] {{
-            background-color: #007bff !important;
-        }}
-        /* Celujemy we wszystko co może mieć tło wewnątrz pigułki */
-        div[data-baseweb="tag"] * {{
-            background-color: transparent !important;
-            color: white !important;
-        }}
-
-        /* 4. CHECKBOX - NAPRAWA (Niebieski tylko kwadrat) */
-        /* Najpierw usuwamy tło z całego rzędu */
-        div[data-testid="stCheckbox"] label span {{
-            background-color: transparent !important;
-        }}
-        /* Kolorujemy tylko kwadracik gdy zaznaczony */
-        div[data-testid="stCheckbox"] input:checked + div {{
-            background-color: #007bff !important;
-            border-color: #007bff !important;
-        }}
-
-        /* 5. RADIO BUTTONS - Kropka */
-        div[role="radiogroup"] div[data-baseweb="radio"] div[size] {{
-            background-color: #007bff !important;
-        }}
-        
-        /* 6. Karty podsumowania - Dynamiczna krawędź */
-        .metric-card {{
+        /* Karty podsumowania */
+        .metric-card {
             background-color: #f8f9fa;
             padding: 15px;
             border-radius: 10px;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
             margin-bottom: 10px;
-            border-left: 8px solid; /* Kolor ustawiany inline w kodzie */
-        }}
+            border-left: 8px solid;
+        }
+        .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; }
+        .metric-value { font-size: 1.1rem; color: #333; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -224,7 +198,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v192_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v193_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -253,7 +227,7 @@ if not st.session_state['data'].empty:
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # LOGIKA PRZYCISKU (Wyszarzony + sugerująca treść)
+    # Przycisk Optymalizacji
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     btn_label = "OBLICZ OPTYMALNE TRASY" if not not_ready else "WYBIERZ START I METĘ, ABY OBLICZYĆ"
     
@@ -263,11 +237,6 @@ if not st.session_state['data'].empty:
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
             grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique() if f in v_f]
             
-            single_color = "#007bff"
-            if mode == "Jedna trasa" and not f_df.empty:
-                main_rejon = f_df['source_file'].value_counts().idxmax()
-                single_color = COLORS[u_f.index(main_rejon) % len(COLORS)]
-
             for idx, g in enumerate(grps):
                 if g.empty: continue
                 curr_p = {"lat": sc['lat'], "lng": sc['lng']}
@@ -290,11 +259,10 @@ if not st.session_state['data'].empty:
                 
                 rejon_name = g['source_file'].iloc[0]
                 rejon_idx = u_f.index(rejon_name)
-                final_color = single_color if mode == "Jedna trasa" else COLORS[rejon_idx % len(COLORS)]
-
+                
                 st.session_state['optimized_list'].append(pd.DataFrame(route))
                 st.session_state['geometries'].append({
-                    "geom": geom, "color": final_color, "dist": dist, "time": dur, 
+                    "geom": geom, "color": COLORS[rejon_idx % len(COLORS)], "dist": dist, "time": dur, 
                     "name": rejon_name if mode != "Jedna trasa" else "Wszystkie", 
                     "pts_count": len(g)
                 })
