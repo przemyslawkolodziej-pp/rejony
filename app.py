@@ -19,7 +19,6 @@ st.markdown("""
         div.stButton > button[kind="primary"] { background-color: #007bff !important; color: white !important; border: none !important; }
         div.stButton > button[disabled] { background-color: #f0f2f6 !important; color: #6c757d !important; border: 1px solid #dcdcdc !important; opacity: 1 !important; }
         
-        /* Karty podsumowania */
         .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 8px solid; }
         .metric-title { font-weight: bold; color: #495057; margin-bottom: 8px; font-size: 1.1rem; }
         .metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; color: #333; font-weight: 500; }
@@ -27,7 +26,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FUNKCJE LOGIKI ---
+# --- 2. FUNKCJE POMOCNICZE ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -50,12 +49,10 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        # Lokalizacje
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
-        l_rows = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
-        l_sh.update(values=l_rows, range_name='A1')
-        # Projekty
+        l_sh.update(values=[["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()], range_name='A1')
+        
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
@@ -66,8 +63,8 @@ def sync_save():
                 s['optimized_cache'] = {k: {**v, 'df': v['df'].to_dict()} for k, v in s['optimized_cache'].items()}
             p_rows.append([str(p_n), base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()])
         p_sh.update(values=p_rows, range_name='A1')
-        st.toast("Zsynchronizowano z chmurą! ✅")
-    except Exception as e: st.error(f"Błąd zapisu: {e}")
+        st.toast("Zsynchronizowano! ✅")
+    except Exception as e: st.error(f"Błąd sync: {e}")
 
 def sync_load():
     try:
@@ -94,28 +91,53 @@ def sync_load():
 @st.dialog("Otwórz projekt")
 def modal_open_project():
     if not st.session_state['projects']:
-        st.write("Brak zapisanych projektów."); return
+        st.write("Brak projektów."); return
     sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
     if st.button("Wczytaj"):
         st.session_state.update(st.session_state['projects'][sel]); st.rerun()
 
+@st.dialog("Zapisz projekt")
+def modal_save_project():
+    n = st.text_input("Nazwa projektu:", value=f"Projekt {time.strftime('%H:%M:%S')}")
+    if st.button("Zapisz") and n:
+        st.session_state['projects'][n] = {
+            'data': st.session_state['data'].copy(), 
+            'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
+            'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
+            'optimized_cache': st.session_state['optimized_cache'].copy()
+        }
+        sync_save(); st.rerun()
+
+@st.dialog("Dodaj KML")
+def modal_add_kml():
+    up = st.file_uploader("Wybierz pliki KML", type=['kml'], accept_multiple_files=True)
+    if st.button("Wczytaj i zamknij") and up:
+        all_pts = []
+        for f in up:
+            content = f.read().decode('utf-8')
+            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
+                n = re.search(r'<(?:name|display_name)>(.*?)</', pm)
+                c = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
+                if c: all_pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(c.group(2)), "lng": float(c.group(1)), "source_file": f.name})
+        if all_pts:
+            st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(all_pts)], ignore_index=True).drop_duplicates()
+            st.rerun()
+
 @st.dialog("Usuń KML")
 def modal_remove_kml():
-    if st.session_state['data'].empty:
-        st.write("Brak wgranych plików."); return
+    if st.session_state['data'].empty: st.write("Brak wgranych plików."); return
     u_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     to_del = st.multiselect("Wybierz pliki do usunięcia:", u_f)
     if st.button("Usuń zaznaczone"):
         st.session_state['data'] = st.session_state['data'][~st.session_state['data']['source_file'].isin(to_del)]
-        # Czyścimy cache dla usuniętych plików
         for f in to_del:
             if f in st.session_state['optimized_cache']: del st.session_state['optimized_cache'][f]
         st.rerun()
 
 @st.dialog("Dodaj nową bazę")
 def modal_add_base():
-    n, a = st.text_input("Nazwa (np. Magazyn):"), st.text_input("Adres:")
-    if st.button("Zapisz bazę") and n and a:
+    n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
+    if st.button("Dodaj") and n and a:
         st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
 
 # --- 4. INICJALIZACJA ---
@@ -127,7 +149,6 @@ if 'initialized' not in st.session_state:
         'start_name': "---", 'meta_name': "---"
     })
 
-# Auto-load projektów po odświeżeniu
 if check_auth() and not st.session_state['projects']:
     sync_load()
 
@@ -141,38 +162,13 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA ---
+# --- 5. NAWIGACJA (Przywrócony przycisk KML) ---
 with st.container():
     c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
-    if c[1].button("💾 Zapisz", use_container_width=True): 
-        if st.session_state['data'].empty: st.error("Brak danych do zapisu")
-        else:
-            n = f"Projekt {time.strftime('%H:%M:%S')}"
-            st.session_state['projects'][n] = {
-                'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
-                'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-                'optimized_cache': st.session_state['optimized_cache'].copy()
-            }
-            sync_save()
-    if c[2].button("➕ Zapisz jako Nowy", use_container_width=True):
-        st.info("Użyj przycisku Zapisz lub wybierz projekt z listy.")
-    
-    # Dodawanie KML (inline dla uproszczenia)
-    up = st.sidebar.file_uploader("Wgraj KML", type=['kml'], accept_multiple_files=True, key="nav_up")
-    if up:
-        new_pts = []
-        for f in up:
-            content = f.read().decode('utf-8')
-            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
-                n = re.search(r'<(?:name|display_name)>(.*?)</', pm)
-                co = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
-                if co: new_pts.append({"display_name": n.group(1) if n else "Punkt", "lat": float(co.group(2)), "lng": float(co.group(1)), "source_file": f.name})
-        if new_pts:
-            st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(new_pts)], ignore_index=True).drop_duplicates()
-            st.rerun()
-
-    if c[3].button("📎 Dodaj KML", use_container_width=True): st.info("Użyj panelu bocznego do wgrania plików.")
+    if c[1].button("💾 Zapisz", use_container_width=True): modal_save_project()
+    if c[2].button("➕ Zapisz jako Nowy", use_container_width=True): modal_save_project()
+    if c[3].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
     if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
     if c[5].button("🏠 Dodaj Bazę", use_container_width=True): modal_add_base()
     if c[6].button("🗑️ Wyczyść", use_container_width=True):
@@ -186,7 +182,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v195_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v196_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -205,33 +201,26 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
         st.session_state['optimized_cache'] = {}; st.rerun()
 
-# --- 7. LOGIKA MULTISELECT (Zamiast usuwania pigułek) ---
+# --- 7. LOGIKA ---
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
-    
-    # 4. Multiselect - Pigułki nie znikają, bo domyślnie zaznaczamy wszystkie wgrane
     v_f = st.multiselect("Wybrane rejony do wyświetlenia:", all_rejs, default=all_rejs)
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # Obliczamy tylko te, które są zaznaczone W MULTISELECT i NIE ma ich w cache
-    to_calculate = [f for f in v_f if f not in st.session_state['optimized_cache']]
-    
+    to_calc = [f for f in v_f if f not in st.session_state['optimized_cache']]
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     
-    if not_ready:
-        btn_label, btn_disabled = "WYBIERZ START I METĘ, ABY OBLICZYĆ", True
-    elif not to_calculate:
-        btn_label, btn_disabled = "WSZYSTKIE WYBRANE REJONY SĄ JUŻ OBLICZONE", True
-    else:
-        btn_label, btn_disabled = f"OBLICZ REJONY ({len(to_calculate)})", False
+    if not_ready: btn_label, btn_dis = "WYBIERZ START I METĘ, ABY OBLICZYĆ", True
+    elif not to_calc: btn_label, btn_dis = "WSZYSTKIE WYBRANE REJONY SĄ JUŻ OBLICZONE", True
+    else: btn_label, btn_dis = f"OBLICZ REJONY ({len(to_calc)})", False
 
-    if st.button(btn_label, type="primary", use_container_width=True, disabled=btn_disabled):
+    if st.button(btn_label, type="primary", use_container_width=True, disabled=btn_dis):
         with st.spinner("Obliczanie..."):
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-            for f_name in to_calculate:
+            for f_name in to_calc:
                 g = st.session_state['data'][st.session_state['data']['source_file'] == f_name]
                 curr_p = {"lat": sc['lat'], "lng": sc['lng']}
                 route, unv = [curr_p], g.to_dict('records')
@@ -256,7 +245,6 @@ if not st.session_state['data'].empty:
                 }
             st.rerun()
 
-    # --- MAPA I PODSUMOWANIE ---
     m = folium.Map()
     bounds = []
     if st.session_state['start_coords']:
@@ -267,7 +255,6 @@ if not st.session_state['data'].empty:
         folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
     
     active_routes = {k: v for k, v in st.session_state['optimized_cache'].items() if k in v_f}
-    
     for name, data in active_routes.items():
         folium.PolyLine([[c[1], c[0]] for c in data['geom']], color=data['color'], weight=5, opacity=0.8).add_to(m)
         if show_pins:
@@ -279,7 +266,6 @@ if not st.session_state['data'].empty:
     if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550)
 
-    # 5. Podsumowanie ze sformatowanymi ikonkami
     if active_routes:
         st.markdown("### 📊 Szczegóły wybranych rejonów")
         cols = st.columns(min(len(active_routes), 3))
@@ -288,18 +274,9 @@ if not st.session_state['data'].empty:
                 st.markdown(f"""
                 <div class="metric-card" style="border-left-color: {data['color']};">
                     <div class="metric-title">📍 {name}</div>
-                    <div class="metric-row">
-                        <span class="metric-icon">🛣️</span>
-                        <span>Dystans: <b>{data['dist']/1000:.2f} km</b></span>
-                    </div>
-                    <div class="metric-row">
-                        <span class="metric-icon">📍</span>
-                        <span>Punkty: <b>{data['pts_count']} szt.</b></span>
-                    </div>
-                    <div class="metric-row" style="color: #6c757d;">
-                        <span class="metric-icon">⏱️</span>
-                        <span>Czas: <b>{int(data['time']//60)} min</b></span>
-                    </div>
+                    <div class="metric-row"><span class="metric-icon">🛣️</span><span>Dystans: <b>{data['dist']/1000:.2f} km</b></span></div>
+                    <div class="metric-row"><span class="metric-icon">📍</span><span>Punkty: <b>{data['pts_count']} szt.</b></span></div>
+                    <div class="metric-row" style="color: #6c757d;"><span class="metric-icon">⏱️</span><span>Czas: <b>{int(data['time']//60)} min</b></span></div>
                 </div>
                 """, unsafe_allow_html=True)
                 with st.expander("Lista punktów"):
