@@ -14,23 +14,33 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 # Lista dostępnych kolorów dla rejonów
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# Custom CSS - dostosowanie kolorów do przycisku Optymalizacji (#007bff)
+# Custom CSS - Agresywne wymuszenie kolorów z załącznika
 st.markdown(f"""
     <style>
         .stButton>button {{ border-radius: 8px; }}
-        /* Kolor przycisku głównego */
+        
+        /* Przycisk Primary (Optymalizacja) */
         div.stButton > button[kind="primary"] {{
             background-color: #007bff !important;
             border-color: #007bff !important;
+        }}
+
+        /* Kolor "pigułek" w multiselekcie (Wybrane rejony) */
+        span[data-baseweb="tag"] {{
+            background-color: #007bff !important;
             color: white !important;
         }}
-        /* Kolor wybranych elementów (multiselect, radio) zgodnie z grafiką */
-        div[data-baseweb="tag"] {{
+        
+        /* Kolor kropek/wyboru w Radio Buttons */
+        div[role="radiogroup"] label[data-baseweb="radio"] div[size] {{
             background-color: #007bff !important;
         }}
-        div[role="radiogroup"] [data-active="true"] {{
-            background-color: #007bff !important;
+        
+        /* Obramowanie aktywnych pol wyboru */
+        div[data-baseweb="select"] > div {{
+            border-color: #007bff !important;
         }}
+
         .metric-card {{
             background-color: #f8f9fa;
             padding: 15px;
@@ -98,10 +108,12 @@ def sync_load():
         for r in proj_data:
             p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
             if p_n and p_j:
-                c = json.loads(zlib.decompress(base64.b64decode(p_j)))
-                if 'data' in c: c['data'] = pd.DataFrame(c['data'])
-                if 'optimized_list' in c: c['optimized_list'] = [pd.DataFrame(df) for df in c['optimized_list']]
-                loaded[p_n] = c
+                try:
+                    c = json.loads(zlib.decompress(base64.b64decode(p_j)))
+                    if 'data' in c: c['data'] = pd.DataFrame(c['data'])
+                    if 'optimized_list' in c: c['optimized_list'] = [pd.DataFrame(df) for df in c['optimized_list']]
+                    loaded[p_n] = c
+                except: pass
         st.session_state['projects'] = loaded
     except: pass
 
@@ -194,7 +206,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v187_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v188_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -223,7 +235,6 @@ if not st.session_state['data'].empty:
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # 1. BLOKADA PRZYCISKU (Jeśli "---", traktuj jako niewybrane)
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     
     if st.button("OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True, disabled=not_ready):
@@ -232,11 +243,11 @@ if not st.session_state['data'].empty:
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
             grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique() if f in v_f]
             
-            # Kolor dla "Jedna trasa" (najwięcej punktów)
+            single_color = "#007bff"
             if mode == "Jedna trasa" and not f_df.empty:
-                main_rejon = f_df['source_file'].value_counts().idxmax()
-                main_idx = u_f.index(main_rejon)
-                single_color = COLORS[main_idx % len(COLORS)]
+                counts = f_df['source_file'].value_counts()
+                main_rejon = counts.idxmax()
+                single_color = COLORS[u_f.index(main_rejon) % len(COLORS)]
 
             for idx, g in enumerate(grps):
                 if g.empty: continue
@@ -270,7 +281,6 @@ if not st.session_state['data'].empty:
                 })
             st.rerun()
 
-    # MAPA
     m = folium.Map()
     bounds = []
     if st.session_state['start_coords']:
@@ -280,8 +290,7 @@ if not st.session_state['data'].empty:
         bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
         folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
     
-    # Rysowanie tras i pinezek w kolorach
-    for g_idx, g in enumerate(st.session_state['geometries']):
+    for g in st.session_state['geometries']:
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     
     if show_pins:
@@ -294,21 +303,25 @@ if not st.session_state['data'].empty:
     if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550)
 
-    # 3 i 4. PODSUMOWANIE ZE SZCZEGÓŁAMI I KOLOREM KRAWĘDZI
+    # --- PODSUMOWANIE (Naprawiony Błąd KeyError) ---
     if st.session_state['geometries']:
         st.markdown("### 📊 Szczegóły rejonów")
         cols = st.columns(min(len(st.session_state['geometries']), 3))
         for idx, g in enumerate(st.session_state['geometries']):
+            # Zabezpieczenie przed brakiem klucza w starych projektach
+            pts = g.get('pts_count', len(st.session_state['optimized_list'][idx]) - 2 if idx < len(st.session_state['optimized_list']) else "?")
+            
             with cols[idx % 3]:
                 st.markdown(f"""
                 <div class="metric-card" style="border-left-color: {g['color']};">
                     <div class="metric-title">📍 {g['name']}</div>
                     <div class="metric-value">Dystans: {g['dist']/1000:.2f} km</div>
-                    <div class="metric-value">Punkty: {g['pts_count']} szt.</div>
+                    <div class="metric-value">Punkty: {pts} szt.</div>
                     <div style="color: #6c757d;">⏱️ Czas: {int(g['time']//60)} min</div>
                 </div>
                 """, unsafe_allow_html=True)
                 with st.expander("Lista punktów"):
-                    st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
+                    if idx < len(st.session_state['optimized_list']):
+                        st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
 else:
     st.info("Wgraj KML i wybierz bazy (Start i Meta nie mogą być '---').")
