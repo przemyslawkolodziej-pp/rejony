@@ -9,7 +9,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 1. KONFIGURACJA ---
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
-
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
 # --- 2. INTEGRACJA Z GOOGLE SHEETS ---
@@ -17,8 +16,7 @@ def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets["gcp_service_account"])
     raw_key = creds_dict["private_key"].strip().strip('"').strip("'")
-    if "\\n" in raw_key:
-        raw_key = raw_key.replace("\\n", "\n")
+    if "\\n" in raw_key: raw_key = raw_key.replace("\\n", "\n")
     creds_dict["private_key"] = raw_key
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
@@ -33,8 +31,7 @@ def decompress_data(compressed_str):
         decoded = base64.b64decode(compressed_str)
         decompressed = zlib.decompress(decoded)
         return json.loads(decompressed.decode('utf-8'))
-    except:
-        return json.loads(compressed_str)
+    except: return json.loads(compressed_str)
 
 def sync_save():
     if not SHEET_ID: return
@@ -49,17 +46,14 @@ def sync_save():
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
-            if isinstance(serializable.get('data'), pd.DataFrame):
-                serializable['data'] = serializable['data'].to_dict()
+            if isinstance(serializable.get('data'), pd.DataFrame): serializable['data'] = serializable['data'].to_dict()
             if 'optimized_list' in serializable:
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
-            compressed_payload = compress_data(serializable)
-            p_rows.append([str(p_name), compressed_payload])
+            p_rows.append([str(p_name), compress_data(serializable)])
         proj_sheet = sheet.worksheet("Projects")
         proj_sheet.update(values=p_rows, range_name='A1', value_input_option='RAW')
-        st.toast("Zsynchronizowano! ✅", icon="☁️")
-    except Exception as e:
-        st.error(f"⚠️ BŁĄD SYNCHRONIZACJI: {str(e)}")
+        st.toast("Zsynchronizowano! ✅")
+    except Exception as e: st.error(f"Błąd synchronizacji: {e}")
 
 def sync_load():
     if not SHEET_ID: return
@@ -75,8 +69,7 @@ def sync_load():
             if p_name and p_json:
                 p_content = decompress_data(p_json)
                 if 'data' in p_content: p_content['data'] = pd.DataFrame(p_content['data'])
-                if 'optimized_list' in p_content:
-                    p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
+                if 'optimized_list' in p_content: p_content['optimized_list'] = [pd.DataFrame(df) for df in p_content['optimized_list']]
                 loaded_projs[p_name] = p_content
         st.session_state['projects'] = loaded_projs
     except: pass
@@ -93,17 +86,6 @@ for key in ['authenticated', 'data', 'optimized_list', 'saved_locations', 'proje
 
 if 'start_name' not in st.session_state: st.session_state.update({'start_name': "Nie wybrano", 'meta_name': "Nie wybrano"})
 
-# OBSŁUGA KLIKNIĘĆ "X" PRZEZ QUERY PARAMS (Stabilne usuwanie)
-q = st.query_params
-if "clear" in q:
-    target = q["clear"]
-    if target == "start":
-        st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
-    elif target == "meta":
-        st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
-    st.query_params.clear()
-    st.rerun()
-
 def check_password():
     if st.session_state['authenticated']: return True
     st.title("🔐 Logowanie")
@@ -119,37 +101,39 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 4. STYLE CSS (Pigułki zintegrowane) ---
+# --- 4. STYLE CSS (NAPRAWA PRZYCISKÓW) ---
 st.markdown("""
 <style>
-    .pill-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+    /* Pasek info */
+    .info-bar-v132 {
         background-color: #f0f2f6;
         border-left: 5px solid #28a745;
-        border-radius: 8px;
+        border-radius: 8px 0 0 8px;
         padding: 0 15px;
         height: 45px;
-        box-sizing: border-box;
-    }
-    .pill-text {
+        display: flex;
+        align-items: center;
         font-size: 14px;
-        color: #31333F;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        width: 100%;
     }
-    .close-btn {
-        color: #ff4b4b;
-        font-weight: bold;
-        cursor: pointer;
-        text-decoration: none;
-        font-size: 20px;
-        line-height: 45px;
-        padding-left: 10px;
+    
+    /* Przycisk X - stylizowany na pigułkę */
+    div[data-testid="stHorizontalBlock"] button[key*="btn_clr_"] {
+        border-radius: 0 8px 8px 0 !important;
+        border: none !important;
+        background-color: #f0f2f6 !important;
+        color: #ff4b4b !important;
+        height: 45px !important;
+        margin-left: -1px !important; /* Łączenie z paskiem */
+        font-weight: bold !important;
+        font-size: 20px !important;
     }
-    .close-btn:hover { color: #b91d1d; }
+    
+    div[data-testid="stHorizontalBlock"] button[key*="btn_clr_"]:hover {
+        background-color: #eceef2 !important;
+        color: #b91d1d !important;
+    }
+
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -166,7 +150,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v131_geo")
+        gl = Nominatim(user_agent="v132_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -199,7 +183,6 @@ def parse_kml(content, name):
 # --- 6. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Zarządzanie")
-    
     with st.expander("☁️ Wgrywanie KML", expanded=False):
         up = st.file_uploader("Dodaj pliki rejonów", type=['kml'], accept_multiple_files=True)
         if up and st.button("Wczytaj"):
@@ -235,16 +218,14 @@ with st.sidebar:
                 with c3:
                     if st.button("🗑️", key=f"d_{sel_b}"):
                         del st.session_state['saved_locations'][sel_b]
-                        sync_save()
-                        st.rerun()
+                        sync_save(); st.rerun()
         st.markdown("---")
         with st.form("new_b", clear_on_submit=True):
             n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
             if st.form_submit_button("➕ Dodaj"):
                 if n and a: 
                     st.session_state['saved_locations'][n] = a
-                    sync_save()
-                    st.rerun()
+                    sync_save(); st.rerun()
 
     with st.expander("📁 Projekty", expanded=True):
         p_name = st.text_input("Zapisz projekt jako:")
@@ -254,12 +235,10 @@ with st.sidebar:
                 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
                 'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
             }
-            sync_save()
-            st.rerun()
+            sync_save(); st.rerun()
         if st.session_state['projects']:
             st.markdown("---")
-            sorted_projs = sorted(st.session_state['projects'].keys())
-            sel_p = st.selectbox("Wybierz projekt:", ["---"] + sorted_projs)
+            sel_p = st.selectbox("Wybierz projekt:", ["---"] + sorted(st.session_state['projects'].keys()))
             if sel_p != "---":
                 col_open, col_del = st.columns([3, 1])
                 with col_open:
@@ -268,37 +247,41 @@ with st.sidebar:
                 with col_del:
                     if st.button("🗑️", key=f"del_proj_{sel_p}"):
                         del st.session_state['projects'][sel_p]
-                        sync_save()
-                        st.rerun()
+                        sync_save(); st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
 
-# --- 7. PANEL GŁÓWNY ---
+# --- 7. PANEL GŁÓWNY (POWRÓT DO STABLINYCH KOLUMN) ---
 st.title("🗺️ Optymalizator Tras")
 
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    s_active = st.session_state['start_name'] != "Nie wybrano"
-    x_s = f'<a href="/?clear=start" target="_self" class="close-btn">×</a>' if s_active else ""
-    st.markdown(f'<div class="pill-container"><span class="pill-text">🏠 <b>START:</b> {st.session_state["start_name"]}</span>{x_s}</div>', unsafe_allow_html=True)
+    c_p, c_b = st.columns([0.88, 0.12], gap="none", vertical_alignment="center")
+    c_p.markdown(f'<div class="info-bar-v132">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state["start_name"] != "Nie wybrano":
+        if c_b.button("×", key="btn_clr_start"):
+            st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
+            st.rerun()
 
 with col_main_2:
-    m_active = st.session_state['meta_name'] != "Nie wybrano"
-    x_m = f'<a href="/?clear=meta" target="_self" class="close-btn">×</a>' if m_active else ""
-    st.markdown(f'<div class="pill-container"><span class="pill-text">🏁 <b>META:</b> {st.session_state["meta_name"]}</span>{x_m}</div>', unsafe_allow_html=True)
+    c_p, c_b = st.columns([0.88, 0.12], gap="none", vertical_alignment="center")
+    c_p.markdown(f'<div class="info-bar-v132">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+    if st.session_state["meta_name"] != "Nie wybrano":
+        if c_b.button("×", key="btn_clr_meta"):
+            st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
+            st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# --- MAPA I OBLICZENIA ---
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-
 if not st.session_state['data'].empty:
     col_filters, col_view = st.columns([2, 1])
     with col_filters:
         u_files = sorted(st.session_state['data']['source_file'].unique().tolist())
         v_files = st.multiselect("Rejony:", u_files, default=u_files, key=f"ms_{st.session_state['reset_counter']}")
         filtered_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_files)]
-    
     with col_view:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
@@ -342,11 +325,9 @@ if not st.session_state['data'].empty:
     visible_geoms = [g for g in st.session_state['geometries'] if mode == "Jedna trasa" or g.get('source_file') in v_files]
     for g in visible_geoms: 
         folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
-    
     if show_pins:
         for _, r in filtered_df.iterrows():
             folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=file_color_map.get(r['source_file'], 'gray'), icon='circle', prefix='fa'), tooltip=r['display_name']).add_to(m)
-    
     st_folium(m, width="100%", height=550, key=f"map_{st.session_state['reset_counter']}")
     
     if st.session_state['geometries']:
@@ -354,17 +335,4 @@ if not st.session_state['data'].empty:
         tt = sum(g['time'] for g in visible_geoms)
         st.success(f"📊 RAZEM: {td/1000:.2f} km | Szacowany czas: {int(tt//3600)}h {int((tt%3600)//60)}min")
 else:
-    if sc or mc:
-        st.info("📍 Wybrano bazę. Wgraj KML, aby zobaczyć mapę.")
-        m = folium.Map()
-        pts = []
-        if sc: 
-            folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green')).add_to(m)
-            pts.append([sc['lat'], sc['lng']])
-        if mc: 
-            folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red')).add_to(m)
-            pts.append([mc['lat'], mc['lng']])
-        m.fit_bounds(pts)
-        st_folium(m, width="100%", height=550)
-    else:
-        st.info("👈 Wgraj KML i wybierz bazy w pasku bocznym.")
+    st.info("👈 Wgraj KML i wybierz bazy w pasku bocznym.")
