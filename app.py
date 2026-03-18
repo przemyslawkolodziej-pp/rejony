@@ -108,57 +108,28 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 4. STYLE CSS (NAPRAWIONE POZYCJONOWANIE) ---
+# --- 4. STYLE CSS ---
 st.markdown("""
 <style>
-    /* Kontener paska */
-    .pill-container {
+    .info-bar {
         background-color: #f0f2f6;
-        border-radius: 12px;
-        border-left: 6px solid #28a745;
-        height: 45px;
+        border-left: 5px solid #28a745;
+        border-radius: 8px;
+        padding: 10px 15px;
+        font-size: 14px;
+        min-height: 45px;
         display: flex;
         align-items: center;
-        padding: 0 45px 0 15px;
-        font-size: 14px;
-        position: relative;
-        z-index: 1;
-    }
-
-    /* Symbol X (wizualny) */
-    .pill-x-visual {
-        position: absolute;
-        right: 15px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #808495;
-        font-weight: bold;
-        font-size: 18px;
-        pointer-events: none;
-    }
-
-    /* Ukryty przycisk - fizycznie podciągnięty do góry */
-    .stButton.pill-clear-btn {
-        margin-top: -45px !important; /* Wciąga przycisk na wysokość paska */
-        height: 45px !important;
-        text-align: right;
-        z-index: 2;
-    }
-
-    .stButton.pill-clear-btn button {
-        width: 100% !important;
-        height: 45px !important;
-        background: transparent !important;
-        border: none !important;
-        color: transparent !important;
-        box-shadow: none !important;
-    }
-
-    /* Efekt hover na paski */
-    .pill-container:hover {
-        background-color: #e8eaf0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     
+    div.stButton > button {
+        border-radius: 8px;
+        height: 45px;
+    }
+
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -175,7 +146,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v127_geo")
+        gl = Nominatim(user_agent="v129_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -285,31 +256,31 @@ with st.sidebar:
 # --- 7. PANEL GŁÓWNY ---
 st.title("🗺️ Optymalizator Tras")
 
-col_main_1, col_main_2 = st.columns(2)
+# UKŁAD 4-KOLUMNOWY: Start | X | Meta | X
+# Proporcje: 40% pole, 10% przycisk, 40% pole, 10% przycisk
+col1, col2, col3, col4 = st.columns([0.4, 0.1, 0.4, 0.1], vertical_alignment="center")
 
-with col_main_1:
-    st.markdown(f'''<div class="pill-container">🏠 <b>START:</b> {st.session_state["start_name"]}
-    {'<div class="pill-x-visual">✕</div>' if st.session_state["start_name"] != "Nie wybrano" else ""}</div>''', unsafe_allow_html=True)
+with col1:
+    st.markdown(f'<div class="info-bar">🏠 <b>START:</b> {st.session_state["start_name"]}</div>', unsafe_allow_html=True)
+
+with col2:
     if st.session_state["start_name"] != "Nie wybrano":
-        st.markdown('<div class="pill-clear-btn">', unsafe_allow_html=True)
-        if st.button("", key="clear_s_final"):
+        if st.button("✖", key="clear_s_v4", use_container_width=True):
             st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
-with col_main_2:
-    st.markdown(f'''<div class="pill-container">🏁 <b>META:</b> {st.session_state["meta_name"]}
-    {'<div class="pill-x-visual">✕</div>' if st.session_state["meta_name"] != "Nie wybrano" else ""}</div>''', unsafe_allow_html=True)
+with col3:
+    st.markdown(f'<div class="info-bar">🏁 <b>META:</b> {st.session_state["meta_name"]}</div>', unsafe_allow_html=True)
+
+with col4:
     if st.session_state["meta_name"] != "Nie wybrano":
-        st.markdown('<div class="pill-clear-btn">', unsafe_allow_html=True)
-        if st.button("", key="clear_m_final"):
+        if st.button("✖", key="clear_m_v4", use_container_width=True):
             st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ... (RESZTA KODU BEZ ZMIAN) ...
+# ... (Dalsza część kodu bez zmian) ...
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty:
