@@ -108,62 +108,57 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 4. STYLE CSS ---
+# --- 4. STYLE CSS (NAPRAWIONE POZYCJONOWANIE) ---
 st.markdown("""
 <style>
-    /* Styl paska z przyciskiem wewnątrz */
+    /* Kontener paska */
     .pill-container {
-        position: relative;
         background-color: #f0f2f6;
         border-radius: 12px;
         border-left: 6px solid #28a745;
-        height: 48px;
+        height: 45px;
         display: flex;
         align-items: center;
-        padding: 0 40px 0 15px; /* Rezerwacja miejsca na X z prawej */
-        font-size: 15px;
-        color: #31333f;
-        box-sizing: border-box;
-        overflow: hidden;
-        margin-bottom: 10px;
+        padding: 0 45px 0 15px;
+        font-size: 14px;
+        position: relative;
+        z-index: 1;
     }
 
-    /* Wizualny symbol X wewnątrz paska */
+    /* Symbol X (wizualny) */
     .pill-x-visual {
         position: absolute;
-        right: 12px;
-        font-weight: bold;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
         color: #808495;
-        font-family: sans-serif;
+        font-weight: bold;
         font-size: 18px;
-        pointer-events: none; /* Kliknięcia przechodzą pod spód do przycisku st.button */
+        pointer-events: none;
     }
 
-    /* Ukryty przycisk Streamlit nałożony na X */
+    /* Ukryty przycisk - fizycznie podciągnięty do góry */
     .stButton.pill-clear-btn {
-        position: absolute;
-        right: 0;
-        top: 0;
-        width: 45px;
-        height: 48px;
-        z-index: 10;
+        margin-top: -45px !important; /* Wciąga przycisk na wysokość paska */
+        height: 45px !important;
+        text-align: right;
+        z-index: 2;
     }
 
-    /* Robimy przycisk całkowicie przeźroczysty */
     .stButton.pill-clear-btn button {
+        width: 100% !important;
+        height: 45px !important;
         background: transparent !important;
         border: none !important;
         color: transparent !important;
-        width: 45px !important;
-        height: 48px !important;
         box-shadow: none !important;
     }
 
-    .stButton.pill-clear-btn button:hover {
-        background: rgba(255, 75, 75, 0.1) !important;
+    /* Efekt hover na paski */
+    .pill-container:hover {
+        background-color: #e8eaf0;
     }
-
-    /* Standardowe przyciski */
+    
     button[kind="primary"] { background-color: #28a745 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -180,7 +175,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v126_geo")
+        gl = Nominatim(user_agent="v127_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -293,40 +288,28 @@ st.title("🗺️ Optymalizator Tras")
 col_main_1, col_main_2 = st.columns(2)
 
 with col_main_1:
-    # Kontener udający "pigułkę"
-    st.markdown(f'''
-        <div class="pill-container">
-            🏠 <b>START:</b> {st.session_state["start_name"]}
-            {"<div class='pill-x-visual'>✕</div>" if st.session_state["start_name"] != "Nie wybrano" else ""}
-        </div>
-    ''', unsafe_allow_html=True)
-    
-    # Niewidoczny przycisk nałożony na pigułkę (tylko gdy wybrana baza)
+    st.markdown(f'''<div class="pill-container">🏠 <b>START:</b> {st.session_state["start_name"]}
+    {'<div class="pill-x-visual">✕</div>' if st.session_state["start_name"] != "Nie wybrano" else ""}</div>''', unsafe_allow_html=True)
     if st.session_state["start_name"] != "Nie wybrano":
         st.markdown('<div class="pill-clear-btn">', unsafe_allow_html=True)
-        if st.button("", key="clear_s_hidden"):
+        if st.button("", key="clear_s_final"):
             st.session_state.update({'start_name': "Nie wybrano", 'start_coords': None})
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
 with col_main_2:
-    st.markdown(f'''
-        <div class="pill-container">
-            🏁 <b>META:</b> {st.session_state["meta_name"]}
-            {"<div class='pill-x-visual'>✕</div>" if st.session_state["meta_name"] != "Nie wybrano" else ""}
-        </div>
-    ''', unsafe_allow_html=True)
-    
+    st.markdown(f'''<div class="pill-container">🏁 <b>META:</b> {st.session_state["meta_name"]}
+    {'<div class="pill-x-visual">✕</div>' if st.session_state["meta_name"] != "Nie wybrano" else ""}</div>''', unsafe_allow_html=True)
     if st.session_state["meta_name"] != "Nie wybrano":
         st.markdown('<div class="pill-clear-btn">', unsafe_allow_html=True)
-        if st.button("", key="clear_m_hidden"):
+        if st.button("", key="clear_m_final"):
             st.session_state.update({'meta_name': "Nie wybrano", 'meta_coords': None})
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ... (Dalsza część kodu mapy i obliczeń bez zmian) ...
+# ... (RESZTA KODU BEZ ZMIAN) ...
 sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
 
 if not st.session_state['data'].empty:
