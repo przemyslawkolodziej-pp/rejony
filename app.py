@@ -95,26 +95,17 @@ keys = {
 for k, v in keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# Logika ciasteczek (bez cache)
-auth_val = cookie_manager.get(cookie="authenticated_user")
+# Pobieramy wszystkie ciasteczka naraz - to jest stabilniejsze
+cookies = cookie_manager.get_all()
+auth_val = cookies.get("authenticated_user")
+
+# Debugging (opcjonalne - usuń po testach):
+# st.write(f"DEBUG: Znalezione ciasteczka: {cookies}")
 
 if auth_val == st.secrets.get("password") and not st.session_state['authenticated']:
     st.session_state['authenticated'] = True
     sync_load()
-
-if not st.session_state['authenticated']:
-    st.title("🔐 Logowanie")
-    with st.form("login"):
-        p = st.text_input("Hasło:", type="password")
-        if st.form_submit_button("Zaloguj"):
-            if p == st.secrets.get("password"):
-                exp = datetime.datetime.now() + datetime.timedelta(days=30)
-                cookie_manager.set("authenticated_user", p, expires_at=exp)
-                st.session_state['authenticated'] = True
-                sync_load()
-                st.rerun()
-            else: st.error("❌ Błędne hasło")
-    st.stop()
+    st.rerun() # Wymuszamy odświeżenie po autologowaniu
 
 # --- 4. STYLE ---
 st.markdown("<style>div.stButton > button { border-radius: 8px; } button[kind='primary'] { background-color: #28a745 !important; color: white !important; }</style>", unsafe_allow_html=True)
