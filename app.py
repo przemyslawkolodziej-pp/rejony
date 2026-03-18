@@ -11,7 +11,31 @@ from oauth2client.service_account import ServiceAccountCredentials
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
-# --- 2. FUNKCJE (TWOJE ORYGINALNE) ---
+# Custom CSS dla kolorystyki i kart
+st.markdown("""
+    <style>
+        .stButton>button { border-radius: 8px; }
+        /* Stylizacja przycisku głównego na stonowany niebieski */
+        div.stButton > button[kind="primary"] {
+            background-color: #007bff !important;
+            border-color: #007bff !important;
+            color: white !important;
+        }
+        /* Stylizacja kart podsumowania */
+        .metric-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 5px solid #28a745;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 10px;
+        }
+        .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; }
+        .metric-value { font-size: 1.2rem; color: #28a745; font-weight: bold; }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 2. FUNKCJE POMOCNICZE ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -19,8 +43,7 @@ def check_auth():
     if st.session_state.get('authenticated'): return True
     params = st.query_params
     if "token" in params:
-        valid_token = generate_session_token(st.secrets.get("password", ""))
-        if params["token"] == valid_token:
+        if params["token"] == generate_session_token(st.secrets.get("password", "")):
             st.session_state['authenticated'] = True
             return True
     return False
@@ -78,14 +101,14 @@ def sync_load():
         st.session_state['projects'] = loaded
     except: pass
 
-# --- 3. MODALE (DLA TWOICH PRZYCISKÓW) ---
+# --- 3. MODALE ---
 @st.dialog("Otwórz projekt")
 def modal_open_project():
     if not st.session_state['projects']:
         st.write("Brak projektów.")
         return
-    sel = st.selectbox("Wybierz:", sorted(st.session_state['projects'].keys()))
-    if st.button("Ok"):
+    sel = st.selectbox("Wybierz projekt:", sorted(st.session_state['projects'].keys()))
+    if st.button("Wczytaj"):
         st.session_state.update(st.session_state['projects'][sel])
         st.rerun()
 
@@ -103,7 +126,7 @@ def modal_save_project():
 
 @st.dialog("Dodaj KML")
 def modal_add_kml():
-    up = st.file_uploader("Dodaj pliki", type=['kml'], accept_multiple_files=True)
+    up = st.file_uploader("Dodaj pliki KML", type=['kml'], accept_multiple_files=True)
     if st.button("Wczytaj") and up:
         all_pts = []
         for f in up:
@@ -122,12 +145,12 @@ def modal_add_kml():
 def modal_remove_kml():
     if st.session_state['data'].empty: return
     u_f = sorted(st.session_state['data']['source_file'].unique())
-    to_del = st.multiselect("Wybierz:", u_f)
+    to_del = st.multiselect("Wybierz rejon do usunięcia:", u_f)
     if st.button("Usuń"):
         st.session_state['data'] = st.session_state['data'][~st.session_state['data']['source_file'].isin(to_del)]
         st.rerun()
 
-@st.dialog("Dodaj bazę")
+@st.dialog("Dodaj nową bazę")
 def modal_add_base():
     n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
     if st.button("Dodaj") and n and a:
@@ -154,107 +177,130 @@ if not check_auth():
                 sync_load(); st.rerun()
     st.stop()
 
-# --- 5. TWOJA NAWIGACJA (7 PRZYCISKÓW) ---
-st.markdown("<style>.stMain { margin-top: -30px; } .stButton>button { border-radius: 8px; }</style>", unsafe_allow_html=True)
+# --- 5. NAWIGACJA ---
 with st.container():
-    c = st.columns([1, 1, 1.8, 1.2, 1.2, 1, 1])
+    c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
     if c[1].button("💾 Zapisz", use_container_width=True): modal_save_project()
     if c[2].button("➕ Zapisz jako Nowy", use_container_width=True): modal_save_project()
     if c[3].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
     if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
-    if c[5].button("🏠 Baza+", use_container_width=True): modal_add_base()
-    if c[6].button("🔓 Wyloguj", use_container_width=True):
-        st.query_params.clear(); st.session_state.clear(); st.rerun()
+    if c[5].button("🏠 Dodaj Bazę", use_container_width=True): modal_add_base()
+    if c[6].button("🗑️ Wyczyść", use_container_width=True):
+        st.session_state.update({'data': pd.DataFrame(), 'optimized_list': [], 'geometries': [], 'start_name': "Nie wybrano", 'meta_name': "Nie wybrano", 'start_coords': None, 'meta_coords': None})
+        st.rerun()
 
 st.markdown("---")
 
-# --- 6. START / META ---
-def get_lat_lng_api(addr):
+# --- 6. WYBÓR PUNKTÓW ---
+def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v185").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v186_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
 bases = sorted(list(st.session_state['saved_locations'].keys()))
 c1, c2 = st.columns(2)
 with c1:
-    s_sel = st.selectbox("🏠 START:", ["---"] + bases)
+    s_sel = st.selectbox("🏠 WYBIERZ START:", ["---"] + bases)
     if s_sel != "---" and s_sel != st.session_state['start_name']:
-        st.session_state.update({'start_name': s_sel, 'start_coords': get_lat_lng_api(st.session_state['saved_locations'][s_sel])})
+        st.session_state.update({'start_name': s_sel, 'start_coords': get_lat_lng(st.session_state['saved_locations'][s_sel])})
         st.rerun()
-    st.info(f"Start: {st.session_state['start_name']}")
 with c2:
-    m_sel = st.selectbox("🏁 META:", ["---"] + bases)
+    m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases)
     if m_sel != "---" and m_sel != st.session_state['meta_name']:
-        st.session_state.update({'meta_name': m_sel, 'meta_coords': get_lat_lng_api(st.session_state['saved_locations'][m_sel])})
+        st.session_state.update({'meta_name': m_sel, 'meta_coords': get_lat_lng(st.session_state['saved_locations'][m_sel])})
         st.rerun()
-    st.info(f"Meta: {st.session_state['meta_name']}")
 
-# --- 7. OBLICZENIA I MAPA ---
+# --- 7. LOGIKA OBLICZEŃ I MAPA ---
 if not st.session_state['data'].empty:
-    # Używamy Twojego source_file
     u_f = sorted(st.session_state['data']['source_file'].unique().tolist())
-    v_f = st.multiselect("Widoczne rejony:", u_f, default=u_f)
+    v_f = st.multiselect("Wybrane rejony:", u_f, default=u_f)
     f_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_f)]
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True)
 
-    if st.button("🚀 OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True):
-        if not (st.session_state['start_coords'] and st.session_state['meta_coords']):
-            st.error("Ustaw Start i Metę!")
-        else:
-            with st.spinner("Liczenie..."):
-                st.session_state.update({'optimized_list': [], 'geometries': []})
-                sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-                grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique()]
+    # 1. BLOKADA PRZYCISKU
+    disabled = st.session_state['start_name'] == "Nie wybrano" or st.session_state['meta_name'] == "Nie wybrano"
+    if disabled:
+        st.warning("Wybierz punkt START i META, aby obliczyć trasę.")
+    
+    # 5. USUNIĘTA RAKIETA
+    if st.button("OBLICZ OPTYMALNE TRASY", type="primary", use_container_width=True, disabled=disabled):
+        with st.spinner("Optymalizacja..."):
+            st.session_state.update({'optimized_list': [], 'geometries': []})
+            sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
+            grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique()]
+            
+            for idx, g in enumerate(grps):
+                if g.empty: continue
+                curr_p = {"lat": sc['lat'], "lng": sc['lng']}
+                route, unv = [curr_p], g.to_dict('records')
+                while unv:
+                    nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
+                    route.append(nxt); curr_p = nxt; unv.remove(nxt)
+                route.append({"display_name": "META", "lat": mc['lat'], "lng": mc['lng']})
                 
-                for idx, g in enumerate(grps):
-                    if g.empty: continue
-                    curr_p = {"lat": sc['lat'], "lng": sc['lng']}
-                    route, unv = [curr_p], g.to_dict('records')
-                    while unv:
-                        nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
-                        route.append(nxt); curr_p = nxt; unv.remove(nxt)
-                    route.append({"display_name": "META", "lat": mc['lat'], "lng": mc['lng']})
-                    
-                    coords = [[r['lat'], r['lng']] for r in route]
-                    geom, dist, dur = [], 0, 0
-                    for j in range(0, len(coords)-1, 39):
-                        chunk = coords[j:j+40]
-                        try:
-                            r = requests.get(f"http://router.project-osrm.org/route/v1/driving/{';'.join([f'{c[1]},{c[0]}' for c in chunk])}?overview=full&geometries=geojson").json()
-                            if r['code']=='Ok':
-                                geom.extend(r['routes'][0]['geometry']['coordinates'])
-                                dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
-                        except: pass
-                    
-                    st.session_state['optimized_list'].append(pd.DataFrame(route))
-                    st.session_state['geometries'].append({"geom": geom, "color": ['blue','green','purple','orange','black'][idx%5], "dist": dist, "time": dur, "name": g['source_file'].iloc[0] if mode != "Jedna trasa" else "Wszystkie"})
-                st.rerun()
+                coords = [[r['lat'], r['lng']] for r in route]
+                geom, dist, dur = [], 0, 0
+                for j in range(0, len(coords)-1, 39):
+                    chunk = coords[j:j+40]
+                    try:
+                        r = requests.get(f"http://router.project-osrm.org/route/v1/driving/{';'.join([f'{c[1]},{c[0]}' for c in chunk])}?overview=full&geometries=geojson").json()
+                        if r['code']=='Ok':
+                            geom.extend(r['routes'][0]['geometry']['coordinates'])
+                            dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
+                    except: pass
+                
+                st.session_state['optimized_list'].append(pd.DataFrame(route))
+                st.session_state['geometries'].append({"geom": geom, "color": ['#007bff','#28a745','#6f42c1','#fd7e14','#20c997'][idx%5], "dist": dist, "time": dur, "name": g['source_file'].iloc[0] if mode != "Jedna trasa" else "Wszystkie"})
+            st.rerun()
 
+    # MAPA I AUTO-ZOOM (2)
     m = folium.Map()
-    if st.session_state['start_coords']: folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green')).add_to(m)
-    if st.session_state['meta_coords']: folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red')).add_to(m)
+    bounds = []
+
+    if st.session_state['start_coords']:
+        sc = st.session_state['start_coords']
+        folium.Marker([sc['lat'], sc['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
+        bounds.append([sc['lat'], sc['lng']])
+    
+    if st.session_state['meta_coords']:
+        mc = st.session_state['meta_coords']
+        folium.Marker([mc['lat'], mc['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
+        bounds.append([mc['lat'], mc['lng']])
     
     for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5).add_to(m)
+        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
     
     if show_pins:
         for _, r in f_df.iterrows():
             folium.Marker([r['lat'], r['lng']], tooltip=r['display_name']).add_to(m)
+            bounds.append([r['lat'], r['lng']])
     
-    st_folium(m, width="100%", height=500)
+    # Automatyczne dopasowanie widoku
+    if bounds:
+        m.fit_bounds(bounds)
+    
+    st_folium(m, width="100%", height=550)
 
+    # 3. KARTY ZAKŁADEK (SEKCJE)
     if st.session_state['geometries']:
-        st.markdown("### 📊 Wyniki")
-        for g in st.session_state['geometries']:
-            st.write(f"📍 {g['name']}: {g['dist']/1000:.2f} km | {int(g['time']//60)} min")
-        
-        for idx, df in enumerate(st.session_state['optimized_list']):
-            with st.expander(f"Lista: {st.session_state['geometries'][idx]['name']}"):
-                st.dataframe(df[['display_name', 'source_file']])
+        st.markdown("### 📊 Podsumowanie tras")
+        cols = st.columns(min(len(st.session_state['geometries']), 3))
+        for idx, g in enumerate(st.session_state['geometries']):
+            with cols[idx % 3]:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-title">📍 Rejon: {g['name']}</div>
+                    <div class="metric-value">{g['dist']/1000:.2f} km</div>
+                    <div style="color: #6c757d;">⏱️ Czas: {int(g['time']//60)} min</div>
+                </div>
+                """, unsafe_allow_html=True)
+                with st.expander("Zobacz listę punktów"):
+                    st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
+
 else:
-    st.info("Wgraj KML i wybierz bazy.")
+    st.info("Dodaj pliki KML oraz wybierz bazy, aby rozpocząć.")
