@@ -13,69 +13,63 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# --- AGRESYWNY I PRECYZYJNY CSS ---
+# --- NAJBARDZIEJ AGRESYWNY CSS JAKI MOŻNA ZASTOSOWAĆ ---
 st.markdown(f"""
     <style>
+        /* Globalne zaokrąglenia */
         .stButton>button {{ border-radius: 8px; }}
-        
-        /* 1. Przycisk Primary (Optymalizacja) */
-        div.stButton > button[kind="primary"] {{
+
+        /* 1. Przycisk OPTYMALIZACJA (Aktywny) */
+        button[kind="primary"] {{
             background-color: #007bff !important;
-            border-color: #007bff !important;
             color: white !important;
-        }}
-        /* Przycisk nieaktywny - poprawa czytelności */
-        div.stButton > button[disabled] {{
-            background-color: #e9ecef !important;
-            border-color: #dee2e6 !important;
-            color: #6c757d !important;
-            cursor: not-allowed;
+            border: none !important;
         }}
 
-        /* 2. Multiselect - Naprawa pigułek (bez tła pod tekstem) */
+        /* 2. Przycisk OPTYMALIZACJA (Nieaktywny - WYRAŹNY) */
+        button[disabled] {{
+            background-color: #f0f2f6 !important;
+            color: #555555 !important;
+            border: 1px solid #dcdcdc !important;
+            opacity: 1 !important;
+            cursor: not-allowed !important;
+        }}
+
+        /* 3. MULTISELECT - NAPRAWA (Usunięcie tła pod tekstem) */
         div[data-baseweb="tag"] {{
             background-color: #007bff !important;
-            border-radius: 4px !important;
         }}
-        div[data-baseweb="tag"] span {{
+        /* Celujemy we wszystko co może mieć tło wewnątrz pigułki */
+        div[data-baseweb="tag"] * {{
+            background-color: transparent !important;
             color: white !important;
-            background-color: transparent !important; /* Usunięcie niebieskiego tła pod literami */
-        }}
-        div[data-baseweb="tag"] svg {{
-            fill: white !important;
         }}
 
-        /* 3. Checkbox (Pokaż pinezki) - Tylko kwadracik */
+        /* 4. CHECKBOX - NAPRAWA (Niebieski tylko kwadrat) */
+        /* Najpierw usuwamy tło z całego rzędu */
         div[data-testid="stCheckbox"] label span {{
-            background-color: transparent !important; /* Usunięcie niebieskiego tła pod napisem */
+            background-color: transparent !important;
         }}
-        div[data-testid="stCheckbox"] [data-baseweb="checkbox"] > div:first-child {{
-            border-color: #007bff !important;
-        }}
+        /* Kolorujemy tylko kwadracik gdy zaznaczony */
         div[data-testid="stCheckbox"] input:checked + div {{
             background-color: #007bff !important;
             border-color: #007bff !important;
         }}
 
-        /* 4. Radio Buttons - Kropka wyboru */
-        div[role="radiogroup"] div[data-baseweb="radio"] > div:first-child {{
-            border-color: #007bff !important;
-        }}
+        /* 5. RADIO BUTTONS - Kropka */
         div[role="radiogroup"] div[data-baseweb="radio"] div[size] {{
             background-color: #007bff !important;
         }}
         
-        /* Karty podsumowania */
+        /* 6. Karty podsumowania - Dynamiczna krawędź */
         .metric-card {{
             background-color: #f8f9fa;
             padding: 15px;
             border-radius: 10px;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
             margin-bottom: 10px;
-            border-left: 8px solid;
+            border-left: 8px solid; /* Kolor ustawiany inline w kodzie */
         }}
-        .metric-title {{ font-weight: bold; color: #495057; margin-bottom: 5px; }}
-        .metric-value {{ font-size: 1.1rem; color: #333; font-weight: bold; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -210,7 +204,7 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA ---
+# --- 5. NAWIGACJA (8 PRZYCISKÓW) ---
 with st.container():
     c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
@@ -230,7 +224,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v191_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v192_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -259,7 +253,7 @@ if not st.session_state['data'].empty:
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # Logika przycisku
+    # LOGIKA PRZYCISKU (Wyszarzony + sugerująca treść)
     not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
     btn_label = "OBLICZ OPTYMALNE TRASY" if not not_ready else "WYBIERZ START I METĘ, ABY OBLICZYĆ"
     
