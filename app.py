@@ -28,14 +28,19 @@ def sync_save():
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # Zapis BAZ (Saved Locations)
+        # DEBUG: Sprawdźmy co widzi kod
+        st.toast(f"Łączenie z: {sheet.title}", icon="🔍")
+        
+        # Zapis BAZ
         loc_sheet = sheet.worksheet("SavedLocations")
         loc_sheet.clear()
-        # Przygotowanie danych do zapisu zbiorczego (szybsze i pewniejsze)
         rows = [["Nazwa", "Adres"]]
         for name, addr in st.session_state['saved_locations'].items():
             rows.append([name, addr])
+        
         loc_sheet.update('A1', rows)
+        st.sidebar.success(f"Zapisano w {sheet.title} ✅")
+        st.toast("Dane wysłane do Google!", icon="🚀")
             
         # Zapis PROJEKTÓW (Projects)
         proj_sheet = sheet.worksheet("Projects")
