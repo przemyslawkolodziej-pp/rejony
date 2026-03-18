@@ -20,7 +20,7 @@ def get_gspread_client():
 def sync_save():
     try:
         client = get_gspread_client()
-        sheet = client.open("Baza_Trasy")
+        sheet = client.open_by_key("1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE")
         
         # Zapis BAZ (Saved Locations)
         loc_sheet = sheet.worksheet("SavedLocations")
@@ -51,7 +51,7 @@ def sync_save():
 def sync_load():
     try:
         client = get_gspread_client()
-        sheet = client.open("Baza_Trasy")
+        sheet = client.open_by_key("1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE")
         
         # Wczytanie BAZ
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
