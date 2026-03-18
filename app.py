@@ -35,11 +35,10 @@ def sync_save():
         for name, addr in st.session_state['saved_locations'].items():
             loc_rows.append([str(name), str(addr)])
         
-        loc_sheet.clear()
-        loc_sheet.update(values=loc_rows, range_name='A1')
+        # NADPISYWANIE zamiast czyszczenia (bezpieczniejsze)
+        loc_sheet.update(values=loc_rows, range_name='A1', value_input_option='RAW')
             
         # --- Zapis PROJEKTÓW (Projects) ---
-        # Przygotowujemy dane ZANIM wyczyścimy arkusz
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_name, p_data in st.session_state['projects'].items():
             serializable = p_data.copy()
@@ -48,17 +47,19 @@ def sync_save():
             if 'optimized_list' in serializable:
                 serializable['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in serializable['optimized_list']]
             
-            json_data = json.dumps(serializable, ensure_ascii=False)
+            # Konwersja do JSON bez zbędnych spacji, by zaoszczędzić miejsce
+            json_data = json.dumps(serializable, ensure_ascii=False, separators=(',', ':'))
             p_rows.append([str(p_name), json_data])
         
         proj_sheet = sheet.worksheet("Projects")
-        proj_sheet.clear()
-        # Używamy surowego update dla dużych danych
-        proj_sheet.update(values=p_rows, range_name='A1')
+        # WAŻNE: Najpierw aktualizujemy, nie czyścimy całego arkusza ręcznie
+        proj_sheet.update(values=p_rows, range_name='A1', value_input_option='RAW')
         
         st.toast("Zsynchronizowano z Google Sheets! ✅", icon="☁️")
     except Exception as e:
-        st.error(f"⚠️ BŁĄD SYNCHRONIZACJI: {str(e)}")
+        # Ten błąd nie zniknie sam, dopóki nie klikniesz [x]
+        st.error(f"⚠️ KRYTYCZNY BŁĄD SYNCHRONIZACJI: {str(e)}")
+        st.info("Sprawdź, czy w arkuszu Projects nagłówki nadal są w A1 i B1.")
 
 def sync_load():
     if not SHEET_ID: return
@@ -132,7 +133,7 @@ if not st.session_state['data'].empty:
 
 def get_lat_lng(address):
     try:
-        gl = Nominatim(user_agent="v111_geo")
+        gl = Nominatim(user_agent="v112_geo")
         loc = gl.geocode(address, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
@@ -202,7 +203,6 @@ with st.sidebar:
                     if st.button("🗑️", key=f"d_{sel_b}"):
                         del st.session_state['saved_locations'][sel_b]
                         sync_save()
-                        time.sleep(0.5)
                         st.rerun()
         st.markdown("---")
         with st.form("new_b", clear_on_submit=True):
@@ -236,7 +236,6 @@ with st.sidebar:
                     if st.button("🗑️", key=f"del_proj_{sel_p}"):
                         del st.session_state['projects'][sel_p]
                         sync_save()
-                        time.sleep(0.5)
                         st.rerun()
 
     st.button("🔓 WYLOGUJ", on_click=lambda: st.session_state.update({'authenticated': False}))
