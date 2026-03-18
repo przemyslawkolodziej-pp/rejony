@@ -26,7 +26,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v199_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v200_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -158,7 +158,14 @@ def modal_bases():
         if not st.session_state['saved_locations']: st.write("Brak baz."); return
         sel = st.selectbox("Wybierz bazę do usunięcia:", sorted(st.session_state['saved_locations'].keys()))
         if st.button("Usuń wybraną"):
-            del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
+            # OCHRONA: Jeśli usuwamy aktualnie wybrany Start/Metę, zresetuj ich status
+            if sel == st.session_state['start_name']:
+                st.session_state['start_name'], st.session_state['start_coords'] = "---", None
+            if sel == st.session_state['meta_name']:
+                st.session_state['meta_name'], st.session_state['meta_coords'] = "---", None
+            
+            del st.session_state['saved_locations'][sel]
+            sync_save(); st.rerun()
 
 @st.dialog("Usuń KML")
 def modal_remove_kml():
@@ -203,20 +210,26 @@ with st.container():
 st.markdown("---")
 
 # --- 6. GŁÓWNY UKŁAD ---
-bases = sorted(list(st.session_state['saved_locations'].keys()))
+bases_list = sorted(list(st.session_state['saved_locations'].keys()))
+
 c1, c2 = st.columns(2)
 with c1:
-    s_sel = st.selectbox("🏠 WYBIERZ START:", ["---"] + bases, index=0)
+    # Upewniamy się, że index jest poprawny nawet po usunięciu bazy
+    s_idx = bases_list.index(st.session_state['start_name']) + 1 if st.session_state['start_name'] in bases_list else 0
+    s_sel = st.selectbox("🏠 WYBIERZ START:", ["---"] + bases_list, index=s_idx)
     if s_sel != st.session_state['start_name']:
         st.session_state['start_name'] = s_sel
         st.session_state['start_coords'] = get_lat_lng(st.session_state['saved_locations'][s_sel]) if s_sel != "---" else None
-        st.session_state['optimized_cache'] = {}; st.rerun()
+        # Opcjonalnie: st.session_state['optimized_cache'] = {} # Odkomentuj jeśli chcesz czyścić trasy przy zmianie bazy
+        st.rerun()
+
 with c2:
-    m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases, index=0)
+    m_idx = bases_list.index(st.session_state['meta_name']) + 1 if st.session_state['meta_name'] in bases_list else 0
+    m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases_list, index=m_idx)
     if m_sel != st.session_state['meta_name']:
         st.session_state['meta_name'] = m_sel
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
-        st.session_state['optimized_cache'] = {}; st.rerun()
+        st.rerun()
 
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
@@ -232,7 +245,6 @@ if not st.session_state['data'].empty:
                 st.divider()
 
     with col_main:
-        # Przeniesienie opcji NAD mapkę
         ctrl1, ctrl2 = st.columns([1, 2])
         show_pins = ctrl1.checkbox("Pokaż pinezki punktów", value=True)
         mode = ctrl2.radio("Sposób wyświetlania:", 
@@ -241,13 +253,16 @@ if not st.session_state['data'].empty:
         
         m = folium.Map()
         bounds = []
+        
+        # Rysowanie Startu/Mety jeśli istnieją
         if st.session_state['start_coords']:
             bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
-            folium.Marker(bounds[-1], icon=folium.Icon(color='green', icon='play', prefix='fa')).add_to(m)
+            folium.Marker(bounds[-1], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip="START").add_to(m)
         if st.session_state['meta_coords']:
             bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
-            folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
+            folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa'), tooltip="META").add_to(m)
         
+        # Rysowanie tras z pamięci (Cache)
         active_routes = {k: v for k, v in st.session_state['optimized_cache'].items() if k in v_f}
         for name, data in active_routes.items():
             folium.PolyLine([[c[1], c[0]] for c in data['geom']], color=data['color'], weight=5, opacity=0.8).add_to(m)
@@ -260,6 +275,7 @@ if not st.session_state['data'].empty:
         if bounds: m.fit_bounds(bounds)
         st_folium(m, width="100%", height=550)
 
+    # --- PODSUMOWANIE ---
     if active_routes:
         st.markdown("### 📊 Szczegóły tras")
         cols = st.columns(min(len(active_routes), 3))
