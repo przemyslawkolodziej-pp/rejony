@@ -5,3 +5,4 @@ streamlit-folium
 geopy
 gspread
 oauth2client
+extra-streamlit-components
