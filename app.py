@@ -29,7 +29,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v210_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v212_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -144,14 +144,22 @@ def modal_add_kml():
                 name = re.search(r'<(?:name|display_name)>(.*?)</', pm)
                 coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
                 
-                # Ulepszony parser - szuka tekstu w całym Placemarku, ignorując tagi HTML
-                desc = re.search(r'<description>(.*?)</description>', pm, re.DOTALL)
-                text_to_search = desc.group(1) if desc else pm
+                # NOWY PARSER DLA FORMATU <Data name="..."><value>...</value>
+                rej_match = re.search(r'<Data name="NR_REJONU">.*?<value>(.*?)</value>', pm, re.DOTALL)
+                pna_match = re.search(r'<Data name="PNA_DORECZ">.*?<value>(.*?)</value>', pm, re.DOTALL)
                 
-                # Szukamy NR_REJONU (obsługuje: NR_REJONU: 123, NR_REJONU</b> 123, itp.)
-                nr_rej_match = re.search(r'NR_REJONU\s*[:</b>\s]+([\w\d/-]+)', text_to_search)
-                # Szukamy PNA_DORECZ (obsługuje: PNA_DORECZ: 00-000, itp.)
-                pna_match = re.search(r'PNA_DORECZ\s*[:</b>\s]+([\d-]+)', text_to_search)
+                # Backup dla formatu SimpleData lub opisowego (na wszelki wypadek)
+                nr_rej_val = "n/a"
+                if rej_match: nr_rej_val = rej_match.group(1).strip()
+                else:
+                    alt = re.search(r'NR_REJONU\s*[:</b>\s]+([\w\d/-]+)', pm)
+                    if alt: nr_rej_val = alt.group(1)
+                
+                pna_val = "n/a"
+                if pna_match: pna_val = pna_match.group(1).strip()
+                else:
+                    alt = re.search(r'PNA_DORECZ\s*[:</b>\s]+([\d-]+)', pm)
+                    if alt: pna_val = alt.group(1)
                 
                 if coords:
                     pts.append({
@@ -159,8 +167,8 @@ def modal_add_kml():
                         "lat": float(coords.group(2)), 
                         "lng": float(coords.group(1)), 
                         "source_file": f.name, 
-                        "nr_rejonu": nr_rej_match.group(1) if nr_rej_match else "n/a", 
-                        "pna_dorecz": pna_match.group(1) if pna_match else "n/a"
+                        "nr_rejonu": nr_rej_val, 
+                        "pna_dorecz": pna_val
                     })
             if pts:
                 df_new = pd.DataFrame(pts)
@@ -297,7 +305,9 @@ if not st.session_state['data'].empty:
     if active_routes:
         st.markdown("### 📊 Szczegóły i Harmonogram")
         for name, data in active_routes.items():
+            # Karta szczegółów z ilością punktów
             st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ {data["dist"]/1000:.2f} km | ⏱️ {int(data["time"]//60)} min | 🧩 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
+            # Tabela z kolejnością
             with st.expander(f"Pokaż kolejność dla {name}"):
                 cols_to_show = [c for c in ['display_name', 'nr_rejonu', 'pna_dorecz', 'lat', 'lng'] if c in data['df'].columns]
                 st.table(data['df'][cols_to_show])
