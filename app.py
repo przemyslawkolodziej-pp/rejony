@@ -353,4 +353,4 @@ else:
         m.fit_bounds(pts)
         st_folium(m, width="100%", height=550)
     else:
-        st.info("👈 Wgraj KML i wybierz bazy.")aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        st.info("👈 Wgraj KML i wybierz bazy.")
