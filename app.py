@@ -13,41 +13,18 @@ st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout=
 
 COLORS = ['#007bff', '#28a745', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#dc3545', '#ffc107']
 
-# --- TYLKO EDYCJA PRZYCISKU OPTYMALIZACJI ---
 st.markdown("""
     <style>
         .stButton>button { border-radius: 8px; }
-        
-        /* Przycisk Primary (Optymalizacja) gdy jest AKTYWNY */
-        div.stButton > button[kind="primary"] {
-            background-color: #007bff !important;
-            color: white !important;
-            border: none !important;
-        }
-
-        /* Przycisk Primary gdy jest ZABLOKOWANY (Start/Meta nie wybrane) */
-        div.stButton > button[disabled] {
-            background-color: #f0f2f6 !important;
-            color: #6c757d !important;
-            border: 1px solid #dcdcdc !important;
-            opacity: 1 !important;
-        }
-
-        /* Karty podsumowania */
-        .metric-card {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
-            margin-bottom: 10px;
-            border-left: 8px solid;
-        }
+        div.stButton > button[kind="primary"] { background-color: #007bff !important; color: white !important; border: none !important; }
+        div.stButton > button[disabled] { background-color: #f0f2f6 !important; color: #6c757d !important; border: 1px solid #dcdcdc !important; opacity: 1 !important; }
+        .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 8px solid; }
         .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; }
         .metric-value { font-size: 1.1rem; color: #333; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FUNKCJE POMOCNICZE ---
+# --- 2. FUNKCJE (Cache-friendly) ---
 def generate_session_token(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -70,18 +47,21 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
+        # Zapis lokalizacji
         l_sh = sheet.worksheet("SavedLocations")
         l_sh.clear()
         l_rows = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
         l_sh.update(values=l_rows, range_name='A1')
+        # Zapis projektów (w tym cache'u tras)
         p_sh = sheet.worksheet("Projects")
         p_sh.clear()
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         for p_n, p_d in st.session_state['projects'].items():
             s = p_d.copy()
             if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
-            if 'optimized_list' in s:
-                s['optimized_list'] = [df.to_dict() if isinstance(df, pd.DataFrame) else df for df in s['optimized_list']]
+            # Cache konwertujemy na format zjadliwy dla JSON
+            if 'optimized_cache' in s:
+                s['optimized_cache'] = {k: {**v, 'df': v['df'].to_dict()} for k, v in s['optimized_cache'].items()}
             p_rows.append([str(p_n), base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()])
         p_sh.update(values=p_rows, range_name='A1')
         st.toast("Zsynchronizowano! ✅")
@@ -101,7 +81,8 @@ def sync_load():
                 try:
                     c = json.loads(zlib.decompress(base64.b64decode(p_j)))
                     if 'data' in c: c['data'] = pd.DataFrame(c['data'])
-                    if 'optimized_list' in c: c['optimized_list'] = [pd.DataFrame(df) for df in c['optimized_list']]
+                    if 'optimized_cache' in c:
+                        c['optimized_cache'] = {k: {**v, 'df': pd.DataFrame(v['df'])} for k, v in c['optimized_cache'].items()}
                     loaded[p_n] = c
                 except: pass
         st.session_state['projects'] = loaded
@@ -121,9 +102,10 @@ def modal_save_project():
     n = st.text_input("Nazwa projektu:")
     if st.button("Zapisz") and n:
         st.session_state['projects'][n] = {
-            'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
+            'data': st.session_state['data'].copy(), 
+            'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'],
             'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'],
-            'optimized_list': [df.copy() for df in st.session_state['optimized_list']], 'geometries': st.session_state['geometries']
+            'optimized_cache': st.session_state['optimized_cache'].copy()
         }
         sync_save(); st.rerun()
 
@@ -144,27 +126,12 @@ def modal_add_kml():
             st.session_state['data'] = pd.concat([st.session_state['data'], pd.concat(all_pts)], ignore_index=True).drop_duplicates()
             st.rerun()
 
-@st.dialog("Usuń KML")
-def modal_remove_kml():
-    if st.session_state['data'].empty: return
-    u_f = sorted(st.session_state['data']['source_file'].unique())
-    to_del = st.multiselect("Wybierz rejon:", u_f)
-    if st.button("Usuń"):
-        st.session_state['data'] = st.session_state['data'][~st.session_state['data']['source_file'].isin(to_del)]
-        st.rerun()
-
-@st.dialog("Dodaj nową bazę")
-def modal_add_base():
-    n, a = st.text_input("Nazwa:"), st.text_input("Adres:")
-    if st.button("Dodaj") and n and a:
-        st.session_state['saved_locations'][n]=a; sync_save(); st.rerun()
-
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
     st.session_state.update({
         'initialized': True, 'authenticated': False, 'data': pd.DataFrame(), 
-        'optimized_list': [], 'saved_locations': {}, 'projects': {}, 
-        'start_coords': None, 'meta_coords': None, 'geometries': [],
+        'optimized_cache': {}, 'saved_locations': {}, 'projects': {}, 
+        'start_coords': None, 'meta_coords': None,
         'start_name': "---", 'meta_name': "---"
     })
 
@@ -178,17 +145,18 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA (8 PRZYCISKÓW) ---
+# --- 5. NAWIGACJA ---
 with st.container():
     c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
     if c[1].button("💾 Zapisz", use_container_width=True): modal_save_project()
     if c[2].button("➕ Zapisz jako Nowy", use_container_width=True): modal_save_project()
     if c[3].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
-    if c[4].button("❌ Usuń KML", use_container_width=True): modal_remove_kml()
+    if c[4].button("❌ Usuń KML", use_container_width=True): 
+        st.session_state['data'] = pd.DataFrame(); st.session_state['optimized_cache'] = {}; st.rerun()
     if c[5].button("🏠 Dodaj Bazę", use_container_width=True): modal_add_base()
     if c[6].button("🗑️ Wyczyść", use_container_width=True):
-        st.session_state.update({'data': pd.DataFrame(), 'optimized_list': [], 'geometries': [], 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None})
+        st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None})
         st.rerun()
     if c[7].button("🔓 Wyloguj", use_container_width=True):
         st.query_params.clear(); st.session_state.clear(); st.rerun()
@@ -198,7 +166,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v193_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v194_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -209,36 +177,46 @@ with c1:
     if s_sel != st.session_state['start_name']:
         st.session_state['start_name'] = s_sel
         st.session_state['start_coords'] = get_lat_lng(st.session_state['saved_locations'][s_sel]) if s_sel != "---" else None
+        st.session_state['optimized_cache'] = {} # Reset cache przy zmianie bazy
         st.rerun()
 with c2:
     m_sel = st.selectbox("🏁 WYBIERZ METĘ:", ["---"] + bases, index=0)
     if m_sel != st.session_state['meta_name']:
         st.session_state['meta_name'] = m_sel
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
+        st.session_state['optimized_cache'] = {} # Reset cache przy zmianie bazy
         st.rerun()
 
-# --- 7. LOGIKA OBLICZEŃ I MAPA ---
+# --- 7. LOGIKA FILTROWANIA I OBLICZEŃ ---
 if not st.session_state['data'].empty:
     u_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     v_f = st.multiselect("Wybrane rejony:", u_f, default=u_f)
-    f_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_f)]
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
     mode = cv2.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
 
-    # Przycisk Optymalizacji
-    not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
-    btn_label = "OBLICZ OPTYMALNE TRASY" if not not_ready else "WYBIERZ START I METĘ, ABY OBLICZYĆ"
+    # Sprawdzamy, które z wybranych rejonów NIE są jeszcze w cache
+    to_calculate = [f for f in v_f if f not in st.session_state['optimized_cache']]
     
-    if st.button(btn_label, type="primary", use_container_width=True, disabled=not_ready):
-        with st.spinner("Optymalizacja..."):
-            st.session_state.update({'optimized_list': [], 'geometries': []})
+    not_ready = st.session_state['start_name'] == "---" or st.session_state['meta_name'] == "---"
+    
+    if not_ready:
+        btn_label = "WYBIERZ START I METĘ, ABY OBLICZYĆ"
+        btn_disabled = True
+    elif not to_calculate:
+        btn_label = "WSZYSTKIE WYBRANE REJONY SĄ JUŻ OBLICZONE"
+        btn_disabled = True
+    else:
+        btn_label = f"OBLICZ BRAKUJĄCE REJONY ({len(to_calculate)})"
+        btn_disabled = False
+
+    if st.button(btn_label, type="primary", use_container_width=True, disabled=btn_disabled):
+        with st.spinner("Obliczanie nowych tras..."):
             sc, mc = st.session_state['start_coords'], st.session_state['meta_coords']
-            grps = [f_df] if mode == "Jedna trasa" else [f_df[f_df['source_file']==f] for f in f_df['source_file'].unique() if f in v_f]
             
-            for idx, g in enumerate(grps):
-                if g.empty: continue
+            for f_name in to_calculate:
+                g = st.session_state['data'][st.session_state['data']['source_file'] == f_name]
                 curr_p = {"lat": sc['lat'], "lng": sc['lng']}
                 route, unv = [curr_p], g.to_dict('records')
                 while unv:
@@ -257,17 +235,18 @@ if not st.session_state['data'].empty:
                             dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
                     except: pass
                 
-                rejon_name = g['source_file'].iloc[0]
-                rejon_idx = u_f.index(rejon_name)
-                
-                st.session_state['optimized_list'].append(pd.DataFrame(route))
-                st.session_state['geometries'].append({
-                    "geom": geom, "color": COLORS[rejon_idx % len(COLORS)], "dist": dist, "time": dur, 
-                    "name": rejon_name if mode != "Jedna trasa" else "Wszystkie", 
-                    "pts_count": len(g)
-                })
+                # Zapisujemy do cache pod nazwą pliku
+                st.session_state['optimized_cache'][f_name] = {
+                    "geom": geom, 
+                    "color": COLORS[u_f.index(f_name) % len(COLORS)], 
+                    "dist": dist, 
+                    "time": dur,
+                    "pts_count": len(g),
+                    "df": pd.DataFrame(route)
+                }
             st.rerun()
 
+    # --- MAPA (Filtrowana przez multiselect) ---
     m = folium.Map()
     bounds = []
     if st.session_state['start_coords']:
@@ -277,35 +256,35 @@ if not st.session_state['data'].empty:
         bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
         folium.Marker(bounds[-1], icon=folium.Icon(color='red', icon='stop', prefix='fa')).add_to(m)
     
-    for g in st.session_state['geometries']:
-        folium.PolyLine([[c[1], c[0]] for c in g['geom']], color=g['color'], weight=5, opacity=0.8).add_to(m)
+    # Wyświetlamy tylko to, co jest wybrane w multiselect I jest w cache
+    active_routes = {k: v for k, v in st.session_state['optimized_cache'].items() if k in v_f}
     
-    if show_pins:
-        for _, r in f_df.iterrows():
-            r_idx = u_f.index(r['source_file'])
-            p_color = COLORS[r_idx % len(COLORS)]
-            folium.CircleMarker([r['lat'], r['lng']], radius=6, color=p_color, fill=True, fill_color=p_color, fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
-            bounds.append([r['lat'], r['lng']])
+    for name, data in active_routes.items():
+        folium.PolyLine([[c[1], c[0]] for c in data['geom']], color=data['color'], weight=5, opacity=0.8).add_to(m)
+        if show_pins:
+            pts = st.session_state['data'][st.session_state['data']['source_file'] == name]
+            for _, r in pts.iterrows():
+                folium.CircleMarker([r['lat'], r['lng']], radius=6, color=data['color'], fill=True, fill_color=data['color'], fill_opacity=0.7, tooltip=r['display_name']).add_to(m)
+                bounds.append([r['lat'], r['lng']])
     
     if bounds: m.fit_bounds(bounds)
     st_folium(m, width="100%", height=550)
 
-    if st.session_state['geometries']:
-        st.markdown("### 📊 Szczegóły rejonów")
-        cols = st.columns(min(len(st.session_state['geometries']), 3))
-        for idx, g in enumerate(st.session_state['geometries']):
-            pts = g.get('pts_count', len(st.session_state['optimized_list'][idx]) - 2 if idx < len(st.session_state['optimized_list']) else "?")
+    # --- PODSUMOWANIE (Filtrowane) ---
+    if active_routes:
+        st.markdown("### 📊 Szczegóły wybranych rejonów")
+        cols = st.columns(min(len(active_routes), 3))
+        for idx, (name, data) in enumerate(active_routes.items()):
             with cols[idx % 3]:
                 st.markdown(f"""
-                <div class="metric-card" style="border-left-color: {g['color']};">
-                    <div class="metric-title">📍 {g['name']}</div>
-                    <div class="metric-value">Dystans: {g['dist']/1000:.2f} km</div>
-                    <div class="metric-value">Punkty: {pts} szt.</div>
-                    <div style="color: #6c757d;">⏱️ Czas: {int(g['time']//60)} min</div>
+                <div class="metric-card" style="border-left-color: {data['color']};">
+                    <div class="metric-title">📍 {name}</div>
+                    <div class="metric-value">Dystans: {data['dist']/1000:.2f} km</div>
+                    <div class="metric-value">Punkty: {data['pts_count']} szt.</div>
+                    <div style="color: #6c757d;">⏱️ Czas: {int(data['time']//60)} min</div>
                 </div>
                 """, unsafe_allow_html=True)
                 with st.expander("Lista punktów"):
-                    if idx < len(st.session_state['optimized_list']):
-                        st.dataframe(st.session_state['optimized_list'][idx][['display_name']], use_container_width=True)
+                    st.dataframe(data['df'][['display_name']], use_container_width=True)
 else:
     st.info("Wgraj KML i wybierz bazy.")
