@@ -23,6 +23,9 @@ st.markdown("""
         .metric-title { font-weight: bold; color: #495057; margin-bottom: 8px; font-size: 1.1rem; }
         .metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; color: #333; font-weight: 500; }
         .metric-icon { width: 20px; text-align: center; }
+        
+        /* Styl dla kontenera rejonów */
+        .rejon-box { border: 1px solid #eee; border-radius: 5px; padding: 10px; background: #ffffff; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -162,7 +165,7 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. NAWIGACJA (Przywrócony przycisk KML) ---
+# --- 5. NAWIGACJA ---
 with st.container():
     c = st.columns([1, 1, 1.8, 1.2, 1.2, 1.2, 1.2, 1])
     if c[0].button("📂 Otwórz", use_container_width=True): modal_open_project()
@@ -182,7 +185,7 @@ st.markdown("---")
 # --- 6. WYBÓR PUNKTÓW ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v196_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v197_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -201,10 +204,18 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_sel]) if m_sel != "---" else None
         st.session_state['optimized_cache'] = {}; st.rerun()
 
-# --- 7. LOGIKA ---
+# --- 7. PANEL STEROWANIA REJONAMI (ZAMIAST MULTISELECTA) ---
 if not st.session_state['data'].empty:
     all_rejs = sorted(st.session_state['data']['source_file'].unique().tolist())
-    v_f = st.multiselect("Wybrane rejony do wyświetlenia:", all_rejs, default=all_rejs)
+    
+    st.write("### 🗺️ Wybierz rejony do wyświetlenia")
+    v_f = []
+    with st.container(height=180):
+        cols_rejs = st.columns(4)
+        for i, rej_name in enumerate(all_rejs):
+            is_calc = " ✅" if rej_name in st.session_state['optimized_cache'] else ""
+            if cols_rejs[i % 4].checkbox(f"{rej_name}{is_calc}", value=True, key=f"chk_{rej_name}"):
+                v_f.append(rej_name)
     
     cv1, cv2 = st.columns(2)
     show_pins = cv1.checkbox("Pokaż pinezki", value=True)
