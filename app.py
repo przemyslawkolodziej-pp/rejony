@@ -172,7 +172,8 @@ def modal_projects():
             if not n.strip(): st.error("Nazwa projektu nie może być pusta!")
             elif n in st.session_state['projects']: st.session_state['overwrite_confirm'] = n
             else:
-                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                # Wersja dla czasu zimowego (UTC+1)
+                now_str = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
                 st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
                 sync_save(); st.rerun()
         if st.session_state.get('overwrite_confirm') == n:
