@@ -387,7 +387,7 @@ if not st.session_state['data'].empty:
                                 <div class="metric-row">📏 {data['dist']/1000:.2f} km</div>
                                 <div class="metric-row">⏱️ {int(data['time']//60)} min</div>
                                 <div class="metric-row">📦 Paczki: {data['paczki_count']}</div>
-                                <div class="metric-row">🚶 Stopy: {data['stopy_count']}</div>
+                                <div class="metric-row">🛑 Stopy: {data['stopy_count']}</div>
                             </div>
                         """, unsafe_allow_html=True)
         
