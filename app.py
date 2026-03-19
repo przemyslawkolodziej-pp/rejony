@@ -17,10 +17,22 @@ COLOR_MAP = {
     '#20c997': 'cadetblue', '#e83e8c': 'pink', '#dc3545': 'red', '#ffc107': 'lightgray'
 }
 
+st.markdown("""
+    <style>
+        .stButton>button { border-radius: 8px; }
+        .metric-card { 
+            background-color: #f8f9fa; padding: 12px; border-radius: 10px; 
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 15px; border-left: 8px solid;
+        }
+        .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; font-size: 1rem; }
+        .metric-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; color: #333; font-size: 0.9rem; font-weight: 500; }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="gemini_v219_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="gemini_v220_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -141,8 +153,8 @@ def modal_add_kml():
             for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
                 coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
                 
+                # Poprawiony Regex: DOTALL + obsługa spacji
                 def get_val(key):
-                    # Regex odporny na wiele linii i spacje
                     m = re.search(rf'<Data name="{key}">\s*<value>(.*?)</value>', pm, re.DOTALL)
                     return m.group(1).strip() if m else None
 
@@ -154,7 +166,7 @@ def modal_add_kml():
                 if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
                 
                 full_adr = f"{ulica} {nr_dom}".strip()
-                if not ulica or full_adr == "None":
+                if not ulica or full_adr == "" or full_adr == "None":
                     name_t = re.search(r'<name>(.*?)</name>', pm)
                     full_adr = name_t.group(1) if name_t else "Punkt"
 
@@ -228,12 +240,15 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
         st.session_state['map_bounds'] = None; st.rerun()
 
-# --- 6. GŁÓWNA MAPA ---
+# --- 6. GŁÓWNA MAPA I PODSUMOWANIE ---
 if not st.session_state['data'].empty:
     v_f = []
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
+    
     col_list, col_main = st.columns([1, 3.5])
     with col_list:
+        # Multiselect / Tryb Rejonów
+        st.markdown("### Rejony")
         with st.container(height=500):
             for r_n in all_f:
                 if st.checkbox(r_n, value=True, key=f"v_{r_n}"): v_f.append(r_n)
@@ -260,7 +275,6 @@ if not st.session_state['data'].empty:
                     f_color = COLOR_MAP.get(cache['color'], 'blue')
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     for _, r in pts.iterrows():
-                        # BEZPIECZNE POBIERANIE DANYCH DO POPUPU
                         d_n = r.get('display_name', 'Punkt')
                         rej = r.get('NR_REJONU', 'n/a')
                         pna = r.get('PNA_DORECZ', 'n/a')
@@ -273,12 +287,29 @@ if not st.session_state['data'].empty:
         elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
         st_folium(m, width="100%", height=550, key="main_map")
 
+    # --- PODSUMOWANIE SZCZEGÓŁOWE (METRYKI I TABELE) ---
     if active_routes:
-        st.markdown("### 📊 Harmonogram")
-        for r_n, data in active_routes.items():
-            with st.expander(f"📍 Trasa: {r_n}"):
-                df_v = data['df'].copy()
-                cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ'] if c in df_v.columns]
-                st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
+        st.markdown("### 📊 Szczegóły tras")
+        r_names = list(active_routes.keys())
+        # Wyświetlanie kart z metrykami w rzędach po 3
+        for i in range(0, len(r_names), 3):
+            m_cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(r_names):
+                    name = r_names[i + j]
+                    data = active_routes[name]
+                    with m_cols[j]:
+                        st.markdown(f"""
+                            <div class="metric-card" style="border-left-color: {data['color']};">
+                                <div class="metric-title">📍 {name}</div>
+                                <div class="metric-row">📏 {data['dist']/1000:.2f} km</div>
+                                <div class="metric-row">⏱️ {int(data['time']//60)} min</div>
+                                <div class="metric-row">📦 Punkty: {data['pts_count']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        with st.expander("Lista punktów"):
+                            df_v = data['df'].copy()
+                            cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ'] if c in df_v.columns]
+                            st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
 else:
     st.info("Wgraj pliki KML.")
