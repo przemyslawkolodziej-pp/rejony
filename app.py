@@ -32,7 +32,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v222_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v223_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -248,14 +248,15 @@ with c2:
 
 # --- 6. MAPA I LISTA BOCZNA ---
 if not st.session_state['data'].empty:
-    v_f = []
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    # Tryb tworzenia trasy (nad mapą)
-    st.multiselect("Tryb tworzenia trasy:", ["Domyślny (OSRM)", "Najkrótsza (Liniowa)"], default="Domyślny (OSRM)")
+    # WYBÓR TRYBU (NAD MAPĄ)
+    mode = st.multiselect("Wybierz tryb mapy:", 
+                        ["Jedna trasa (punkty ze wszystkich rejonów razem)", "Oddzielne trasy (punkty dla każdego rejonu oddzielnie)"],
+                        default=["Oddzielne trasy (punkty dla każdego rejonu oddzielnie)"])
 
     col_list, col_main = st.columns([1, 3.5])
-    
+    v_f = []
     with col_list:
         st.markdown("### Rejony")
         with st.container(height=550):
@@ -323,7 +324,6 @@ if not st.session_state['data'].empty:
                             </div>
                         """, unsafe_allow_html=True)
 
-        # Harmonogramy pod spodem
         st.markdown("---")
         st.markdown("### 📝 Listy punktów (Harmonogram)")
         for name in r_names:
