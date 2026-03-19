@@ -166,7 +166,7 @@ def modal_projects():
         if not proj_list: st.info("Brak projektów.")
         else:
             sel = st.selectbox("Otwórz:", options=range(len(proj_list)), format_func=lambda x: proj_list[x]['label'])
-            if st.button("Wczytaj i przelicz", use_container_width=True):
+            if st.button("Wczytaj", use_container_width=True):
                 p_data = st.session_state['projects'][proj_list[sel]['name']]
                 st.session_state.update(p_data)
                 recalculate_all()
