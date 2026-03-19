@@ -361,4 +361,4 @@ if not st.session_state['data'].empty:
                 csv = df_to_show.to_csv(index=False, sep='\t').encode('utf-8')
                 st.download_button("📋 Skopiuj dane (Pobierz jako TSV/Excel)", data=csv, file_name=f"harmonogram_{name}.xls", mime="application/vnd.ms-excel", key=f"btn_copy_{name}")
 else:
-    st.info("Wgraj pliki KML w menu 'Pliki KML'.")
+    st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
