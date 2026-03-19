@@ -392,41 +392,48 @@ if not st.session_state['data'].empty:
             with st.expander(f"Lista dla: {name}"):
                 df_res = display_routes[name]['df'].copy()
                 
-                # 1. Funkcja pomocnicza do budowania adresu
+                # 1. Funkcja pomocnicza do budowania adresu (z uwzględnieniem danych baz)
                 def build_address(row, idx, total):
                     # Pierwszy wiersz (Start)
                     if idx == 0:
-                        return f"🏠 {st.session_state['start_name']}"
+                        baza_n = st.session_state['start_name']
+                        baza_a = st.session_state['saved_locations'].get(baza_n, "")
+                        return f"🏠 {baza_n} — {baza_a}"
+                    
                     # Ostatni wiersz (Meta)
                     if idx == total - 1:
-                        return f"🏁 {st.session_state['meta_name']}"
+                        baza_n = st.session_state['meta_name']
+                        baza_a = st.session_state['saved_locations'].get(baza_n, "")
+                        return f"🏁 {baza_n} — {baza_a}"
                     
-                    # Środkowe punkty - scalanie danych z KML
+                    # Środkowe punkty - dane z KML
                     parts = [
                         str(row.get('PNA_DORECZ', '')),
                         str(row.get('MIEJSC_DORECZ', '')),
                         str(row.get('ULICA_DORECZ', '')),
                         str(row.get('NR_DOM_DORECZ', ''))
                     ]
-                    # Filtrujemy puste i łączymy spacją
-                    return " ".join([p for p in parts if p.strip() and p != 'None'])
+                    return " ".join([p for p in parts if p.strip() and p != 'None' and p != '-'])
 
-                # 2. Tworzenie nowej tabeli wynikowej
+                # 2. Tworzenie sformatowanej tabeli
                 total_rows = len(df_res)
                 formatted_data = []
                 
                 for i, (_, row) in enumerate(df_res.iterrows()):
+                    # Dla Startu i Mety czyścimy NR_REJONU i FORMAT, by nie straszyły tam minusy
+                    is_edge = (i == 0 or i == total_rows - 1)
+                    
                     formatted_data.append({
                         'LP': i + 1,
-                        'NR_REJONU': row.get('NR_REJONU', '-'),
+                        'NR_REJONU': "-" if is_edge else row.get('NR_REJONU', '-'),
                         'ADRES': build_address(row, i, total_rows),
-                        'FORMAT': row.get('FORMAT', '-')
+                        'FORMAT': "-" if is_edge else row.get('FORMAT', '-')
                     })
                 
                 df_final = pd.DataFrame(formatted_data)
                 
                 # 3. Wyświetlenie tabeli
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
-                st.caption("💡 Aby skopiować dane do Excela, najedź na tabelę i użyj ikony w jej prawym górnym rogu.")
+                st.caption("💡 Kliknij ikonę w prawym górnym rogu tabeli, aby skopiować dane do Excela.")
 else:
     st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
