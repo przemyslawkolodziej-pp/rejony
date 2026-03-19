@@ -69,64 +69,48 @@ def get_gspread_client():
 
 def sync_save():
     try:
-        # 1. Sprawdzenie czy jest sens zapisywać (ochrona przed nadpisaniem pustką)
         if not st.session_state['projects'] and not st.session_state['saved_locations']:
-             # Jeśli sesja jest całkowicie pusta, nie wysyłaj nic do Google, 
-             # żeby nie skasować tego, co już tam jest.
-             return
+            return
 
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # --- ZAPIS BAZ (SavedLocations) ---
+        # 1. ZAPIS BAZ
         l_sh = sheet.worksheet("SavedLocations")
-        l_values = [["Nazwa", "Adres"]]
-        for n, a in st.session_state['saved_locations'].items():
-            l_values.append([str(n), str(a)])
-        
-        # Czyścimy i zapisujemy nową listę baz
+        l_values = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
         l_sh.clear()
         l_sh.update(values=l_values, range_name='A1', value_input_option='RAW')
         
-        # --- ZAPIS PROJEKTÓW (Projects) ---
+        # 2. ZAPIS PROJEKTÓW - TYLKO DANE WEJŚCIOWE
         p_sh = sheet.worksheet("Projects")
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         
         for p_n, p_d in st.session_state['projects'].items():
-            # Kopiujemy dane, żeby nie zmieniać ich w locie w aplikacji
-            s = dict(p_d)
-            if isinstance(s.get('data'), pd.DataFrame): 
-                s['data'] = s['data'].to_dict()
+            # Wyciągamy tylko surowe dane z KMLi (DataFrame) i ustawienia punktów
+            minimal_data = {
+                'start_name': p_d.get('start_name'),
+                'meta_name': p_d.get('meta_name'),
+                'start_coords': p_d.get('start_coords'),
+                'meta_coords': p_d.get('meta_coords'),
+                'last_modified': p_d.get('last_modified'),
+                # Zapisujemy DataFrame jako listę list (dużo lżejsze niż JSON)
+                'data_values': p_d['data'].values.tolist(),
+                'data_cols': p_d['data'].columns.tolist()
+            }
             
-            # Usuwamy ciężką geometrię przed zapisem (zostanie przeliczona po wczytaniu)
-            if 'optimized_cache' in s:
-                clean_cache = {}
-                for k, v in s['optimized_cache'].items():
-                    if v is not None:
-                        c_v = dict(v)
-                        if 'geom' in c_v: del c_v['geom']
-                        if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): 
-                            c_v['df'] = c_v['df'].to_dict()
-                        clean_cache[k] = c_v
-                s['optimized_cache'] = clean_cache
+            # Kompresja zlib (level 9 - max)
+            json_str = json.dumps(minimal_data, ensure_ascii=False)
+            compressed = base64.b64encode(zlib.compress(json_str.encode('utf-8'), 9)).decode()
             
-            # Kompresja
-            json_str = json.dumps(s)
-            compressed = base64.b64encode(zlib.compress(json_str.encode())).decode()
-            
-            if len(compressed) < 49000:
-                p_rows.append([str(p_n), compressed])
-            else:
-                st.warning(f"Projekt '{p_n}' jest zbyt duży dla Google Sheets (pominę go).")
+            p_rows.append([str(p_n), compressed])
 
-        # Jeśli mamy projekty do zapisu, czyścimy arkusz i wrzucamy nowe
-        if len(p_rows) > 1:
-            p_sh.clear()
-            p_sh.update(values=p_rows, range_name='A1', value_input_option='RAW')
+        # Czyścimy stare i wrzucamy nowe "lekkie" projekty
+        p_sh.clear()
+        p_sh.update(values=p_rows, range_name='A1', value_input_option='RAW')
+        st.toast("Projekt zapisany pomyślnie! ✅")
         
-        st.toast("Zsynchronizowano pomyślnie! ✅")
     except Exception as e: 
-        st.error(f"Błąd krytyczny Google Sheets: {str(e)}")
+        st.error(f"Błąd zapisu do chmury: {str(e)}")
 
 def sync_load():
     try:
@@ -134,34 +118,32 @@ def sync_load():
         sheet = client.open_by_key(SHEET_ID)
         
         # Wczytywanie Lokalizacji
-        loc_sh = sheet.worksheet("SavedLocations")
-        loc_data = loc_sh.get_all_records()
-        if loc_data:
-            st.session_state['saved_locations'] = {str(r['Nazwa']): str(r['Adres']) for r in loc_data if 'Nazwa' in r and r['Nazwa']}
+        loc_data = sheet.worksheet("SavedLocations").get_all_records()
+        st.session_state['saved_locations'] = {r['Nazwa']: r['Adres'] for r in loc_data if 'Nazwa' in r}
         
         # Wczytywanie Projektów
-        proj_sh = sheet.worksheet("Projects")
-        proj_data = proj_sh.get_all_records()
-        loaded_projs = {}
+        proj_data = sheet.worksheet("Projects").get_all_records()
+        loaded = {}
         for r in proj_data:
-            name = r.get('Nazwa Projektu')
-            blob = r.get('Dane JSON')
-            if name and blob:
+            p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
+            if p_n and p_j:
                 try:
-                    raw_json = zlib.decompress(base64.b64decode(blob))
-                    data_dict = json.loads(raw_json)
-                    if 'data' in data_dict: 
-                        data_dict['data'] = pd.DataFrame(data_dict['data'])
-                    loaded_projs[str(name)] = data_dict
-                except Exception as e:
-                    continue # Pominięcie uszkodzonych rekordów
-        
-        if loaded_projs:
-            st.session_state['projects'] = loaded_projs
-            return True
+                    # Rozpakowanie danych
+                    raw = zlib.decompress(base64.b64decode(p_j))
+                    d = json.loads(raw)
+                    
+                    # Odtworzenie DataFrame (dzięki temu KML-e wrócą na listę)
+                    if 'data_values' in d:
+                        d['data'] = pd.DataFrame(d['data_values'], columns=d['data_cols'])
+                        del d['data_values']; del d['data_cols']
+                    
+                    # Przygotowanie miejsca na przeliczenie trasy
+                    d['optimized_cache'] = {}
+                    loaded[str(p_n)] = d
+                except: continue
+        st.session_state['projects'] = loaded
     except Exception as e:
-        st.warning(f"Nie udało się pobrać danych z chmury: {e}")
-    return False
+        pass
 
 def recalculate_all():
     # Punkt 1: Indykator przeliczania
