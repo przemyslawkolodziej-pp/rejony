@@ -385,14 +385,35 @@ if not st.session_state['data'].empty:
                     name = r_names[i + j]; data = display_routes[name]
                     with m_cols[j]:
                         st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">📏 {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ {int(data["time"]//60)} min</div><div class="metric-row">📦 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
-        st.divider()
+       st.divider()
         st.markdown("### 📝 Harmonogramy")
         for name in r_names:
             with st.expander(f"Lista dla: {name}"):
-                df_to_show = display_routes[name]['df'][['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ']]
-                # Punkt 3: Przycisk kopiowania danych
-                st.dataframe(df_to_show, use_container_width=True, hide_index=True)
-                csv = df_to_show.to_csv(index=False, sep='\t').encode('utf-8')
-                st.download_button("📋 Skopiuj dane (Pobierz jako TSV/Excel)", data=csv, file_name=f"harmonogram_{name}.xls", mime="application/vnd.ms-excel", key=f"btn_copy_{name}")
+                # 1. Przygotowanie danych z nowymi kolumnami
+                df_res = display_routes[name]['df'].copy()
+                
+                # Dodanie L.P. (kolejność punkt po punkcie)
+                df_res.insert(0, 'L.P.', range(1, len(df_res) + 1))
+                
+                # Wybór i kolejność kolumn zgodnie z Twoim życzeniem
+                cols_to_show = [
+                    'L.P.', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 
+                    'ULICA_DORECZ', 'NR_DOM_DORECZ', 'NR_PRZ', 'FORMAT'
+                ]
+                
+                # Upewnienie się, że wszystkie kolumny istnieją w df (uniknięcie KeyError)
+                available_cols = [c for c in cols_to_show if c in df_res.columns]
+                df_final = df_res[available_cols]
+                
+                # 2. Wyświetlenie tabeli
+                # Streamlitowe st.dataframe posiada wbudowany przycisk "Copy to clipboard" 
+                # (pojawia się w prawym górnym rogu tabeli po najechaniu na nią myszką)
+                st.dataframe(
+                    df_final, 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+                
+                st.caption("💡 Aby skopiować dane do Excela, użyj ikony kopiowania w prawym górnym rogu powyższej tabeli.")
 else:
     st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
