@@ -32,7 +32,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v225_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v226_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -159,7 +159,6 @@ def modal_add_kml():
 
                 rej = get_val("NR_REJONU") or get_val("JEDNOSTKA_DOR")
                 if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
-                
                 pna = get_val("PNA_DORECZ")
                 typ_prz = get_val("TYP_PRZ")
                 format_prz = get_val("FORMAT")
@@ -199,6 +198,8 @@ def check_auth():
     return False
 
 if check_auth() and not st.session_state['projects']: sync_load()
+
+# --- 5. INTERFEJS ---
 if not check_auth():
     st.title("🔐 Logowanie")
     with st.form("l"):
@@ -209,7 +210,6 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. INTERFEJS GÓRNY ---
 c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
 if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
@@ -247,16 +247,14 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
         st.session_state['map_bounds'] = None; st.rerun()
 
-# --- 6. GŁÓWNA SEKCJA MAPY ---
+# --- 6. MAPA I LOGIKA TRYBÓW ---
 if not st.session_state['data'].empty:
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    # WYBÓR TRYBU TWORZENIA TRASY (Zgodnie z Twoją treścią i formatem radio)
     route_mode = st.radio(
         "Wybór trybu tworzenia trasy:", 
         ["Jedna trasa (punkty ze wszystkich rejonów razem)", "Oddzielne trasy (punkty dla każdego rejonu oddzielnie)"],
-        horizontal=True,
-        index=1
+        horizontal=True, index=1
     )
 
     col_list, col_main = st.columns([1, 3.5])
@@ -272,8 +270,6 @@ if not st.session_state['data'].empty:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
         active_bounds = []
-        
-        # Bazy
         if st.session_state['start_coords']:
             folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip=st.session_state['start_name']).add_to(m)
             active_bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
@@ -281,63 +277,60 @@ if not st.session_state['data'].empty:
             folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa'), tooltip=st.session_state['meta_name']).add_to(m)
             active_bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
             
-        active_routes = {}
-        for r_n in v_f:
-            cache = st.session_state['optimized_cache'].get(r_n)
-            if cache and 'geom' in cache:
-                folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5).add_to(m)
-                active_routes[r_n] = cache
-                if show_pins:
-                    f_color = COLOR_MAP.get(cache['color'], 'blue')
-                    pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
-                    for _, r in pts.iterrows():
-                        # OPIS PINEZKI ZGODNY Z WYMAGANIAMI
-                        html = f"""
-                        <div style='min-width:200px; font-size:12px;'>
-                            <b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br>
-                            <b>Rejon:</b> {r.get('NR_REJONU','-')}<br>
-                            <b>PNA:</b> {r.get('PNA_DORECZ','-')}<br>
-                            <b>Powiat:</b> {r.get('Powiat','-')}<br>
-                            <b>Gmina:</b> {r.get('Gmina','-')}<br>
-                            <b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br>
-                            <b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}
-                        </div>
-                        """
-                        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
-                        active_bounds.append([r['lat'], r['lng']])
+        display_routes = {}
+        
+        # LOGIKA TRYBU: JEDNA TRASA
+        if "Jedna trasa" in route_mode:
+            combined_df = st.session_state['data'][st.session_state['data']['source_file'].isin(v_f)]
+            if not combined_df.empty:
+                res = optimize_route(combined_df, st.session_state['start_coords'], st.session_state['meta_coords'], 0, st.session_state['start_name'], st.session_state['meta_name'])
+                if res:
+                    display_routes["Wszystkie zaznaczone"] = res
+                    folium.PolyLine([[c[1], c[0]] for c in res['geom']], color=res['color'], weight=5).add_to(m)
+                    if show_pins:
+                        for _, r in combined_df.iterrows():
+                            html = f"<div style='font-size:12px;'><b>Przesyłka: {r.get('TYP_PRZ','-')}</b><br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}</div>"
+                            folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color='blue'), popup=folium.Popup(html, max_width=300)).add_to(m)
+                            active_bounds.append([r['lat'], r['lng']])
+
+        # LOGIKA TRYBU: ODDZIELNE TRASY
+        else:
+            for i, r_n in enumerate(v_f):
+                cache = st.session_state['optimized_cache'].get(r_n)
+                if cache and 'geom' in cache:
+                    display_routes[r_n] = cache
+                    folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5).add_to(m)
+                    if show_pins:
+                        f_color = COLOR_MAP.get(cache['color'], 'blue')
+                        pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
+                        for _, r in pts.iterrows():
+                            html = f"<div style='font-size:12px;'><b>Przesyłka: {r.get('TYP_PRZ','-')}</b><br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}</div>"
+                            folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
+                            active_bounds.append([r['lat'], r['lng']])
 
         if active_bounds and st.session_state['map_bounds'] is None:
             st.session_state['map_bounds'] = active_bounds; m.fit_bounds(active_bounds)
         elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
         st_folium(m, width="100%", height=600, key="main_map")
 
-    # --- PODSUMOWANIE I TABELE NA DOLE ---
-    if active_routes:
+    # --- PODSUMOWANIE ---
+    if display_routes:
         st.markdown("### 📊 Podsumowanie tras")
-        r_names = list(active_routes.keys())
+        r_names = list(display_routes.keys())
         for i in range(0, len(r_names), 3):
             m_cols = st.columns(3)
             for j in range(3):
                 if i + j < len(r_names):
                     name = r_names[i + j]
-                    data = active_routes[name]
+                    data = display_routes[name]
                     with m_cols[j]:
-                        st.markdown(f"""
-                            <div class="metric-card" style="border-left-color: {data['color']};">
-                                <div class="metric-title">📍 {name}</div>
-                                <div class="metric-row">📏 {data['dist']/1000:.2f} km</div>
-                                <div class="metric-row">⏱️ {int(data['time']//60)} min</div>
-                                <div class="metric-row">📦 Punkty: {data['pts_count']}</div>
-                            </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">📏 {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ {int(data["time"]//60)} min</div><div class="metric-row">📦 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
 
         st.divider()
-        st.markdown("### 📝 Harmonogramy (Listy punktów)")
+        st.markdown("### 📝 Harmonogramy")
         for name in r_names:
-            data = active_routes[name]
-            with st.expander(f"Rozwiń listę punktów dla rejonu: {name}"):
-                df_v = data['df'].copy()
-                cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ'] if c in df_v.columns]
-                st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
+            with st.expander(f"Lista dla: {name}"):
+                df_v = display_routes[name]['df'].copy()
+                st.dataframe(df_v[['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ']], use_container_width=True, hide_index=True)
 else:
-    st.info("Wgraj pliki KML, aby rozpocząć optymalizację.")
+    st.info("Wgraj pliki KML.")
