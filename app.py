@@ -385,7 +385,8 @@ if not st.session_state['data'].empty:
                     name = r_names[i + j]; data = display_routes[name]
                     with m_cols[j]:
                         st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">📏 {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ {int(data["time"]//60)} min</div><div class="metric-row">📦 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
-       st.divider()
+       
+    st.divider()
         st.markdown("### 📝 Harmonogramy")
         for name in r_names:
             with st.expander(f"Lista dla: {name}"):
