@@ -32,7 +32,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="gemini_v221_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v222_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -157,7 +157,6 @@ def modal_add_kml():
                     m = re.search(rf'<Data name="{key}">\s*<value>(.*?)</value>', pm, re.DOTALL)
                     return m.group(1).strip() if m else ""
 
-                # Pobieranie wszystkich pól potrzebnych do opisu
                 rej = get_val("NR_REJONU") or get_val("JEDNOSTKA_DOR")
                 if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
                 
@@ -210,7 +209,7 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. INTERFEJS GÓRNY ---
+# --- 5. INTERFEJS ---
 c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
 if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
@@ -247,15 +246,23 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
         st.session_state['map_bounds'] = None; st.rerun()
 
-# --- 6. GŁÓWNA MAPA I TRYB ---
+# --- 6. MAPA I LISTA BOCZNA ---
 if not st.session_state['data'].empty:
     v_f = []
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    # WYBÓR TRYBU / REJONÓW NAD MAPĄ
-    v_f = st.multiselect("Wybierz rejony do wyświetlenia:", all_f, default=all_f)
+    # Tryb tworzenia trasy (nad mapą)
+    st.multiselect("Tryb tworzenia trasy:", ["Domyślny (OSRM)", "Najkrótsza (Liniowa)"], default="Domyślny (OSRM)")
 
-    col_list, col_main = st.columns([0.1, 4.5]) # Lista przeniesiona do multiselecta, zostawiamy miejsce
+    col_list, col_main = st.columns([1, 3.5])
+    
+    with col_list:
+        st.markdown("### Rejony")
+        with st.container(height=550):
+            for r_n in all_f:
+                if st.checkbox(r_n, value=True, key=f"v_{r_n}"): v_f.append(r_n)
+                st.divider()
+
     with col_main:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
@@ -277,7 +284,6 @@ if not st.session_state['data'].empty:
                     f_color = COLOR_MAP.get(cache['color'], 'blue')
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     for _, r in pts.iterrows():
-                        # NOWY OPIS PINEZKI
                         html = f"""
                         <div style='min-width:200px; font-size:12px;'>
                             <b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br>
@@ -297,12 +303,10 @@ if not st.session_state['data'].empty:
         elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
         st_folium(m, width="100%", height=600, key="main_map")
 
-    # --- PODSUMOWANIE SZCZEGÓŁOWE ---
+    # --- PODSUMOWANIE TRAS ---
     if active_routes:
         st.markdown("### 📊 Podsumowanie tras")
         r_names = list(active_routes.keys())
-        
-        # 1. Karty z metrykami
         for i in range(0, len(r_names), 3):
             m_cols = st.columns(3)
             for j in range(3):
@@ -319,15 +323,14 @@ if not st.session_state['data'].empty:
                             </div>
                         """, unsafe_allow_html=True)
 
-        # 2. Tabele z listą punktów (pod wszystkimi kartami)
+        # Harmonogramy pod spodem
         st.markdown("---")
         st.markdown("### 📝 Listy punktów (Harmonogram)")
         for name in r_names:
             data = active_routes[name]
             with st.expander(f"Rozwiń listę punktów dla: {name}"):
                 df_v = data['df'].copy()
-                # Wybieramy kolumny do tabeli
-                cols_to_show = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ'] if c in df_v.columns]
-                st.dataframe(df_v[cols_to_show], use_container_width=True, hide_index=True)
+                cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ'] if c in df_v.columns]
+                st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
 else:
     st.info("Wgraj pliki KML.")
