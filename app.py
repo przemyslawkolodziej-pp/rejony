@@ -69,73 +69,99 @@ def get_gspread_client():
 
 def sync_save():
     try:
+        # 1. Sprawdzenie czy jest sens zapisywać (ochrona przed nadpisaniem pustką)
+        if not st.session_state['projects'] and not st.session_state['saved_locations']:
+             # Jeśli sesja jest całkowicie pusta, nie wysyłaj nic do Google, 
+             # żeby nie skasować tego, co już tam jest.
+             return
+
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
         
-        # 1. ZAPIS LOKALIZACJI (BAZ)
+        # --- ZAPIS BAZ (SavedLocations) ---
         l_sh = sheet.worksheet("SavedLocations")
-        l_values = [["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()]
-        # Używamy update bez wcześniejszego clear - Google sam nadpisze komórki
-        l_sh.update(l_values, value_input_option='RAW')
+        l_values = [["Nazwa", "Adres"]]
+        for n, a in st.session_state['saved_locations'].items():
+            l_values.append([str(n), str(a)])
         
-        # 2. ZAPIS PROJEKTÓW
+        # Czyścimy i zapisujemy nową listę baz
+        l_sh.clear()
+        l_sh.update(values=l_values, range_name='A1', value_input_option='RAW')
+        
+        # --- ZAPIS PROJEKTÓW (Projects) ---
         p_sh = sheet.worksheet("Projects")
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
         
         for p_n, p_d in st.session_state['projects'].items():
-            s = p_d.copy()
+            # Kopiujemy dane, żeby nie zmieniać ich w locie w aplikacji
+            s = dict(p_d)
             if isinstance(s.get('data'), pd.DataFrame): 
                 s['data'] = s['data'].to_dict()
             
+            # Usuwamy ciężką geometrię przed zapisem (zostanie przeliczona po wczytaniu)
             if 'optimized_cache' in s:
                 clean_cache = {}
                 for k, v in s['optimized_cache'].items():
-                    c_v = v.copy()
-                    if 'geom' in c_v: del c_v['geom']
-                    if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): 
-                        c_v['df'] = c_v['df'].to_dict()
-                    clean_cache[k] = c_v
+                    if v is not None:
+                        c_v = dict(v)
+                        if 'geom' in c_v: del c_v['geom']
+                        if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): 
+                            c_v['df'] = c_v['df'].to_dict()
+                        clean_cache[k] = c_v
                 s['optimized_cache'] = clean_cache
             
-            # Kompresja i kodowanie
-            json_data = json.dumps(s)
-            compressed = base64.b64encode(zlib.compress(json_data.encode())).decode()
+            # Kompresja
+            json_str = json.dumps(s)
+            compressed = base64.b64encode(zlib.compress(json_str.encode())).decode()
             
-            # Limit komórki w Google Sheets to 50 000 znaków
-            if len(compressed) < 49500:
+            if len(compressed) < 49000:
                 p_rows.append([str(p_n), compressed])
             else:
-                st.error(f"Projekt '{p_n}' jest za duży, aby zapisać go w arkuszu!")
+                st.warning(f"Projekt '{p_n}' jest zbyt duży dla Google Sheets (pominę go).")
 
-        # Krytyczna zmiana: Czyścimy tylko jeśli mamy nowe dane do wpisania, 
-        # i robimy to w jednej operacji nadpisania (bez jawnego .clear())
+        # Jeśli mamy projekty do zapisu, czyścimy arkusz i wrzucamy nowe
         if len(p_rows) > 1:
-            # Najpierw czyścimy stary obszar (bezpieczniej), a potem wrzucamy nowe
-            p_sh.batch_clear(["A1:B100"]) 
-            p_sh.update(p_rows, value_input_option='RAW')
+            p_sh.clear()
+            p_sh.update(values=p_rows, range_name='A1', value_input_option='RAW')
         
-        st.toast("Zsynchronizowano! ✅")
+        st.toast("Zsynchronizowano pomyślnie! ✅")
     except Exception as e: 
-        st.error(f"Błąd komunikacji z Google: {str(e)}")
+        st.error(f"Błąd krytyczny Google Sheets: {str(e)}")
 
 def sync_load():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        loc_data = sheet.worksheet("SavedLocations").get_all_records()
-        st.session_state['saved_locations'] = {r['Nazwa']: r['Adres'] for r in loc_data if 'Nazwa' in r}
-        proj_data = sheet.worksheet("Projects").get_all_records()
-        loaded = {}
+        
+        # Wczytywanie Lokalizacji
+        loc_sh = sheet.worksheet("SavedLocations")
+        loc_data = loc_sh.get_all_records()
+        if loc_data:
+            st.session_state['saved_locations'] = {str(r['Nazwa']): str(r['Adres']) for r in loc_data if 'Nazwa' in r and r['Nazwa']}
+        
+        # Wczytywanie Projektów
+        proj_sh = sheet.worksheet("Projects")
+        proj_data = proj_sh.get_all_records()
+        loaded_projs = {}
         for r in proj_data:
-            p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
-            if p_n and p_j:
+            name = r.get('Nazwa Projektu')
+            blob = r.get('Dane JSON')
+            if name and blob:
                 try:
-                    c = json.loads(zlib.decompress(base64.b64decode(p_j)))
-                    if 'data' in c: c['data'] = pd.DataFrame(c['data'])
-                    loaded[p_n] = c
-                except: continue
-        st.session_state['projects'] = loaded
-    except: pass
+                    raw_json = zlib.decompress(base64.b64decode(blob))
+                    data_dict = json.loads(raw_json)
+                    if 'data' in data_dict: 
+                        data_dict['data'] = pd.DataFrame(data_dict['data'])
+                    loaded_projs[str(name)] = data_dict
+                except Exception as e:
+                    continue # Pominięcie uszkodzonych rekordów
+        
+        if loaded_projs:
+            st.session_state['projects'] = loaded_projs
+            return True
+    except Exception as e:
+        st.warning(f"Nie udało się pobrać danych z chmury: {e}")
+    return False
 
 def recalculate_all():
     # Punkt 1: Indykator przeliczania
