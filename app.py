@@ -390,23 +390,43 @@ if not st.session_state['data'].empty:
         st.markdown("### 📝 Harmonogramy")
         for name in r_names:
             with st.expander(f"Lista dla: {name}"):
-                # 1. Przygotowanie danych
                 df_res = display_routes[name]['df'].copy()
                 
-                # Dodanie L.P.
-                df_res.insert(0, 'L.P.', range(1, len(df_res) + 1))
+                # 1. Funkcja pomocnicza do budowania adresu
+                def build_address(row, idx, total):
+                    # Pierwszy wiersz (Start)
+                    if idx == 0:
+                        return f"🏠 {st.session_state['start_name']}"
+                    # Ostatni wiersz (Meta)
+                    if idx == total - 1:
+                        return f"🏁 {st.session_state['meta_name']}"
+                    
+                    # Środkowe punkty - scalanie danych z KML
+                    parts = [
+                        str(row.get('PNA_DORECZ', '')),
+                        str(row.get('MIEJSC_DORECZ', '')),
+                        str(row.get('ULICA_DORECZ', '')),
+                        str(row.get('NR_DOM_DORECZ', ''))
+                    ]
+                    # Filtrujemy puste i łączymy spacją
+                    return " ".join([p for p in parts if p.strip() and p != 'None'])
+
+                # 2. Tworzenie nowej tabeli wynikowej
+                total_rows = len(df_res)
+                formatted_data = []
                 
-                # Wybór kolumn zgodnie z Twoją listą
-                cols_to_show = [
-                    'L.P.', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 
-                    'ULICA_DORECZ', 'NR_DOM_DORECZ', 'NR_PRZ', 'FORMAT'
-                ]
+                for i, (_, row) in enumerate(df_res.iterrows()):
+                    formatted_data.append({
+                        'LP': i + 1,
+                        'NR_REJONU': row.get('NR_REJONU', '-'),
+                        'ADRES': build_address(row, i, total_rows),
+                        'FORMAT': row.get('FORMAT', '-')
+                    })
                 
-                # Filtrowanie tylko istniejących kolumn (bezpiecznik)
-                df_final = df_res[[c for c in cols_to_show if c in df_res.columns]]
+                df_final = pd.DataFrame(formatted_data)
                 
-                # 2. Wyświetlenie tabeli z wbudowaną opcją kopiowania
+                # 3. Wyświetlenie tabeli
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
-                st.caption("💡 Najedź na tabelę i użyj ikony w prawym górnym rogu, aby skopiować dane do Excela.")
+                st.caption("💡 Aby skopiować dane do Excela, najedź na tabelę i użyj ikony w jej prawym górnym rogu.")
 else:
     st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
