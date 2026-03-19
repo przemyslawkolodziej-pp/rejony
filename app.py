@@ -392,21 +392,18 @@ if not st.session_state['data'].empty:
             with st.expander(f"Lista dla: {name}"):
                 df_res = display_routes[name]['df'].copy()
                 
-                # 1. Funkcja pomocnicza do budowania adresu (z uwzględnieniem danych baz)
+                # 1. Funkcja pomocnicza do budowania adresu
                 def build_address(row, idx, total):
-                    # Pierwszy wiersz (Start)
                     if idx == 0:
                         baza_n = st.session_state['start_name']
                         baza_a = st.session_state['saved_locations'].get(baza_n, "")
                         return f"🏠 {baza_n} — {baza_a}"
                     
-                    # Ostatni wiersz (Meta)
                     if idx == total - 1:
                         baza_n = st.session_state['meta_name']
                         baza_a = st.session_state['saved_locations'].get(baza_n, "")
                         return f"🏁 {baza_n} — {baza_a}"
                     
-                    # Środkowe punkty - dane z KML
                     parts = [
                         str(row.get('PNA_DORECZ', '')),
                         str(row.get('MIEJSC_DORECZ', '')),
@@ -415,18 +412,18 @@ if not st.session_state['data'].empty:
                     ]
                     return " ".join([p for p in parts if p.strip() and p != 'None' and p != '-'])
 
-                # 2. Tworzenie sformatowanej tabeli
+                # 2. Tworzenie sformatowanej tabeli z nowymi nagłówkami
                 total_rows = len(df_res)
                 formatted_data = []
                 
                 for i, (_, row) in enumerate(df_res.iterrows()):
-                    # Dla Startu i Mety czyścimy NR_REJONU i FORMAT, by nie straszyły tam minusy
                     is_edge = (i == 0 or i == total_rows - 1)
                     
                     formatted_data.append({
-                        'LP': i + 1,
-                        'NR_REJONU': "-" if is_edge else row.get('NR_REJONU', '-'),
+                        'Kolejność': i + 1,
+                        'Rejon': "-" if is_edge else row.get('NR_REJONU', '-'),
                         'ADRES': build_address(row, i, total_rows),
+                        'Przesyłka': "-" if is_edge else row.get('NR_PRZ', '-'),
                         'FORMAT': "-" if is_edge else row.get('FORMAT', '-')
                     })
                 
