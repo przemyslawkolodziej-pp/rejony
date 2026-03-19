@@ -39,14 +39,24 @@ def get_lat_lng(addr):
 
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
-    start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": ""}
-    meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": ""}
+    
+    # Dodajemy wszystkie klucze, by DataFrame był spójny
+    base_p = {
+        "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": "", 
+        "MIEJSC_DORECZ": "", "ULICA_DORECZ": "", "NR_DOM_DORECZ": "", "FORMAT": ""
+    }
+    
+    start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], **base_p}
+    meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], **base_p}
+    
     curr_p = start_p
     route = [curr_p]
     unv = df_points.to_dict('records')
     while unv:
-        nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
+        # math.sqrt jest OK, ale dla precyzji przy dużych odległościach można użyć samej sumy kwadratów (jest szybciej)
+        nxt = min(unv, key=lambda x: (curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2)
         route.append(nxt); curr_p = nxt; unv.remove(nxt)
+    
     route.append(meta_p)
     coords = [[r['lat'], r['lng']] for r in route]
     geom, dist, dur = [], 0, 0
@@ -58,6 +68,7 @@ def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label=
                 geom.extend(r['routes'][0]['geometry']['coordinates'])
                 dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
         except: pass
+    
     return {"geom": geom, "color": COLORS[color_idx % len(COLORS)], "dist": dist, "time": dur, "pts_count": len(df_points), "df": pd.DataFrame(route)}
 
 # --- FUNKCJE SYNC ---
