@@ -36,18 +36,26 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v214_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v216_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
 def optimize_route(df_points, start_coords, meta_coords, color_idx):
     if df_points.empty or not start_coords or not meta_coords: return None
-    curr_p = {"lat": start_coords['lat'], "lng": start_coords['lng']}
-    route, unv = [curr_p], df_points.to_dict('records')
+    
+    # Inicjalizacja trasy z poprawnymi nazwami kolumn z wielkiej litery
+    curr_p = {"display_name": "START", "lat": start_coords['lat'], "lng": start_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"}
+    route = [curr_p]
+    unv = df_points.to_dict('records')
+    
     while unv:
         nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
-        route.append(nxt); curr_p = nxt; unv.remove(nxt)
-    route.append({"display_name": "META", "lat": meta_coords['lat'], "lng": meta_coords['lng']})
+        route.append(nxt)
+        curr_p = nxt
+        unv.remove(nxt)
+        
+    route.append({"display_name": "META", "lat": meta_coords['lat'], "lng": meta_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"})
+    
     coords = [[r['lat'], r['lng']] for r in route]
     geom, dist, dur = [], 0, 0
     for j in range(0, len(coords)-1, 39):
@@ -139,7 +147,7 @@ def modal_projects():
                 st.session_state['last_loaded_project_name'] = proj_list[sel]['name']
                 st.session_state['map_bounds'] = None
                 st.rerun()
-    # Sekcja zapisu i usuwania pozostaje bez zmian
+
     with tab_save:
         n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
         if n and st.button("Zapisz projekt", use_container_width=True):
@@ -162,11 +170,12 @@ def modal_add_kml():
                 rej_match = re.search(r'<Data name="NR_REJONU">.*?<value>(.*?)</value>', pm, re.DOTALL)
                 pna_match = re.search(r'<Data name="PNA_DORECZ">.*?<value>(.*?)</value>', pm, re.DOTALL)
                 
+                # Przypisanie do kluczy pisanych WIELKIMI LITERAMI
                 nr_rej_val = rej_match.group(1).strip() if rej_match else "n/a"
                 pna_val = pna_match.group(1).strip() if pna_match else "n/a"
                 
                 if coords:
-                    pts.append({"display_name": name.group(1) if name else "Punkt", "lat": float(coords.group(2)), "lng": float(coords.group(1)), "source_file": f.name, "nr_rejonu": nr_rej_val, "pna_dorecz": pna_val})
+                    pts.append({"display_name": name.group(1) if name else "Punkt", "lat": float(coords.group(2)), "lng": float(coords.group(1)), "source_file": f.name, "NR_REJONU": nr_rej_val, "PNA_DORECZ": pna_val})
             if pts:
                 df_new = pd.DataFrame(pts)
                 st.session_state['data'] = pd.concat([st.session_state['data'], df_new], ignore_index=True).drop_duplicates()
@@ -270,7 +279,7 @@ if not st.session_state['data'].empty:
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     for _, r in pts.iterrows():
                         r_lat, r_lng = r.get('lat'), r.get('lng')
-                        html = f"<div style='min-width:180px;'><b>{r.get('display_name','Punkt')}</b><hr>REJON: {r.get('nr_rejonu','n/a')}<br>PNA: {r.get('pna_dorecz','n/a')}<hr><form method='post'><button name='del_point' value='{r_lat}|{r_lng}' style='background:#dc3545;color:white;border:none;width:100%;cursor:pointer;'>USUŃ PUNKT</button></form></div>"
+                        html = f"<div style='min-width:180px;'><b>{r.get('display_name','Punkt')}</b><hr>REJON: {r.get('NR_REJONU','n/a')}<br>PNA: {r.get('PNA_DORECZ','n/a')}<hr><form method='post'><button name='del_point' value='{r_lat}|{r_lng}' style='background:#dc3545;color:white;border:none;width:100%;cursor:pointer;'>USUŃ PUNKT</button></form></div>"
                         folium.Marker([r_lat, r_lng], icon=folium.Icon(color=f_color), popup=folium.Popup(html)).add_to(m)
                         active_bounds.append([r_lat, r_lng])
 
@@ -311,6 +320,8 @@ if not st.session_state['data'].empty:
                             </div>
                         """, unsafe_allow_html=True)
                         with st.expander(f"Lista punktów"):
-                            st.dataframe(data['df'][['display_name', 'nr_rejonu', 'pna_dorecz']], use_container_width=True, hide_index=True)
+                            # Użycie kluczy pisanych wielkimi literami w tabeli
+                            existing_cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ'] if c in data['df'].columns]
+                            st.dataframe(data['df'][existing_cols], use_container_width=True, hide_index=True)
 else:
     st.info("Wgraj pliki KML.")
