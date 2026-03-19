@@ -71,26 +71,52 @@ def sync_save():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        l_sh = sheet.worksheet("SavedLocations"); l_sh.clear()
-        l_sh.update(values=[["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()], range_name='A1')
-        p_sh = sheet.worksheet("Projects"); p_sh.clear()
+        
+        # 1. ZAPIS LOKALIZACJI (BAZ)
+        l_sh = sheet.worksheet("SavedLocations")
+        l_values = [["Nazwa", "Adres"]] + [[n, a] for n, a in st.session_state['saved_locations'].items()]
+        # Używamy update bez wcześniejszego clear - Google sam nadpisze komórki
+        l_sh.update(l_values, value_input_option='RAW')
+        
+        # 2. ZAPIS PROJEKTÓW
+        p_sh = sheet.worksheet("Projects")
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
+        
         for p_n, p_d in st.session_state['projects'].items():
             s = p_d.copy()
-            if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
+            if isinstance(s.get('data'), pd.DataFrame): 
+                s['data'] = s['data'].to_dict()
+            
             if 'optimized_cache' in s:
                 clean_cache = {}
                 for k, v in s['optimized_cache'].items():
                     c_v = v.copy()
                     if 'geom' in c_v: del c_v['geom']
-                    if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): c_v['df'] = c_v['df'].to_dict()
+                    if 'df' in c_v and isinstance(c_v['df'], pd.DataFrame): 
+                        c_v['df'] = c_v['df'].to_dict()
                     clean_cache[k] = c_v
                 s['optimized_cache'] = clean_cache
-            compressed = base64.b64encode(zlib.compress(json.dumps(s).encode())).decode()
-            if len(compressed) < 49000: p_rows.append([str(p_n), compressed])
-        p_sh.update(values=p_rows, range_name='A1')
+            
+            # Kompresja i kodowanie
+            json_data = json.dumps(s)
+            compressed = base64.b64encode(zlib.compress(json_data.encode())).decode()
+            
+            # Limit komórki w Google Sheets to 50 000 znaków
+            if len(compressed) < 49500:
+                p_rows.append([str(p_n), compressed])
+            else:
+                st.error(f"Projekt '{p_n}' jest za duży, aby zapisać go w arkuszu!")
+
+        # Krytyczna zmiana: Czyścimy tylko jeśli mamy nowe dane do wpisania, 
+        # i robimy to w jednej operacji nadpisania (bez jawnego .clear())
+        if len(p_rows) > 1:
+            # Najpierw czyścimy stary obszar (bezpieczniej), a potem wrzucamy nowe
+            p_sh.batch_clear(["A1:B100"]) 
+            p_sh.update(p_rows, value_input_option='RAW')
+        
         st.toast("Zsynchronizowano! ✅")
-    except Exception as e: st.error(f"Błąd zapisu: {str(e)}")
+    except Exception as e: 
+        st.error(f"Błąd komunikacji z Google: {str(e)}")
 
 def sync_load():
     try:
