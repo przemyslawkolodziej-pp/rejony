@@ -39,8 +39,8 @@ def get_lat_lng(addr):
 
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
-    start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"}
-    meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"}
+    start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": ""}
+    meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": ""}
     curr_p = start_p
     route = [curr_p]
     unv = df_points.to_dict('records')
@@ -392,13 +392,11 @@ if not st.session_state['data'].empty:
             with st.expander(f"Lista dla: {name}"):
                 df_res = display_routes[name]['df'].copy()
                 
-                # 1. Funkcja pomocnicza do budowania adresu
                 def build_address(row, idx, total):
                     if idx == 0:
                         baza_n = st.session_state['start_name']
                         baza_a = st.session_state['saved_locations'].get(baza_n, "")
                         return f"🏠 {baza_n} — {baza_a}"
-                    
                     if idx == total - 1:
                         baza_n = st.session_state['meta_name']
                         baza_a = st.session_state['saved_locations'].get(baza_n, "")
@@ -410,9 +408,8 @@ if not st.session_state['data'].empty:
                         str(row.get('ULICA_DORECZ', '')),
                         str(row.get('NR_DOM_DORECZ', ''))
                     ]
-                    return " ".join([p for p in parts if p.strip() and p != 'None' and p != '-'])
+                    return " ".join([p for p in parts if p.strip() and p not in ['None', '-', 'nan']])
 
-                # 2. Tworzenie sformatowanej tabeli z nowymi nagłówkami
                 total_rows = len(df_res)
                 formatted_data = []
                 
@@ -429,8 +426,19 @@ if not st.session_state['data'].empty:
                 
                 df_final = pd.DataFrame(formatted_data)
                 
-                # 3. Wyświetlenie tabeli
+                # Wyświetlenie tabeli
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
-                st.caption("💡 Kliknij ikonę w prawym górnym rogu tabeli, aby skopiować dane do Excela.")
+                
+                # PRZYCISK KOPIOWANIA (Czysty tekst do Excela)
+                # Tworzymy tekst, gdzie kolumny są oddzielone tabulatorem (\t)
+                clean_text = df_final.to_csv(index=False, sep='\t')
+                
+                st.download_button(
+                    label="📋 KOPIUJ DO EXCELA (Pobierz tekst)",
+                    data=clean_text,
+                    file_name=f"tabela_{name}.txt",
+                    mime="text/plain",
+                    help="Pobierz plik, otwórz go (np. w Notatniku), naciśnij Ctrl+A, Ctrl+C i wklej do Excela."
+                )
 else:
     st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
