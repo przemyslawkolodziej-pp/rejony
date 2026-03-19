@@ -20,16 +20,23 @@ COLOR_MAP = {
 st.markdown("""
     <style>
         .stButton>button { border-radius: 8px; }
-        .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 10px; border-left: 8px solid; }
-        .metric-title { font-weight: bold; color: #495057; margin-bottom: 8px; font-size: 1.1rem; }
-        .metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; color: #333; font-weight: 500; }
+        .metric-card { 
+            background-color: #f8f9fa; 
+            padding: 12px; 
+            border-radius: 10px; 
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.05); 
+            margin-bottom: 15px; 
+            border-left: 8px solid;
+        }
+        .metric-title { font-weight: bold; color: #495057; margin-bottom: 5px; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .metric-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; color: #333; font-size: 0.9rem; font-weight: 500; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v213_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v214_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -73,7 +80,6 @@ def sync_save():
         for p_n, p_d in st.session_state['projects'].items():
             s = p_d.copy()
             if isinstance(s.get('data'), pd.DataFrame): s['data'] = s['data'].to_dict()
-            # Czyścimy geom przy zapisie, by nie przekroczyć limitu komórki Sheets
             if 'optimized_cache' in s:
                 clean_cache = {}
                 for k, v in s['optimized_cache'].items():
@@ -121,7 +127,6 @@ def modal_projects():
                 p_data = st.session_state['projects'][proj_list[sel]['name']]
                 st.session_state.update(p_data)
                 
-                # WYMUSZONE PRZELICZENIE TRAS PO WCZYTANIU
                 if not st.session_state['data'].empty and st.session_state['start_coords']:
                     with st.spinner("Przeliczam trasy..."):
                         new_cache = {}
@@ -134,6 +139,13 @@ def modal_projects():
                 st.session_state['last_loaded_project_name'] = proj_list[sel]['name']
                 st.session_state['map_bounds'] = None
                 st.rerun()
+    # Sekcja zapisu i usuwania pozostaje bez zmian
+    with tab_save:
+        n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
+        if n and st.button("Zapisz projekt", use_container_width=True):
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
+            sync_save(); st.rerun()
 
 @st.dialog("Dodaj KML")
 def modal_add_kml():
@@ -250,7 +262,6 @@ if not st.session_state['data'].empty:
         active_routes = {}
         for r_n in v_f:
             cache = st.session_state['optimized_cache'].get(r_n)
-            # KLUCZOWE ZABEZPIECZENIE PRZED KeyError: 'geom'
             if cache and 'geom' in cache and cache['geom']:
                 folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5).add_to(m)
                 active_routes[r_n] = cache
@@ -283,10 +294,23 @@ if not st.session_state['data'].empty:
 
     if active_routes:
         st.markdown("### 📊 Szczegóły i Harmonogram")
-        for name, data in active_routes.items():
-            st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">🛣️ {data["dist"]/1000:.2f} km | ⏱️ {int(data["time"]//60)} min | 🧩 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
-            with st.expander(f"Pokaż kolejność dla {name}"):
-                cols_to_show = [c for c in ['display_name', 'nr_rejonu', 'pna_dorecz', 'lat', 'lng'] if c in data['df'].columns]
-                st.table(data['df'][cols_to_show])
+        r_names = list(active_routes.keys())
+        for i in range(0, len(r_names), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(r_names):
+                    name = r_names[i + j]
+                    data = active_routes[name]
+                    with cols[j]:
+                        st.markdown(f"""
+                            <div class="metric-card" style="border-left-color: {data['color']}; min-height: 120px;">
+                                <div class="metric-title">📍 {name}</div>
+                                <div class="metric-row">📏 {data['dist']/1000:.2f} km</div>
+                                <div class="metric-row">⏱️ {int(data['time']//60)} min</div>
+                                <div class="metric-row">📦 Punkty: {data['pts_count']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        with st.expander(f"Lista punktów"):
+                            st.dataframe(data['df'][['display_name', 'nr_rejonu', 'pna_dorecz']], use_container_width=True, hide_index=True)
 else:
     st.info("Wgraj pliki KML.")
