@@ -19,7 +19,7 @@ COLOR_MAP = {
 
 st.markdown("""
     <style>
-        div[data-testid="column"] { display: flex; justify-content: center; } /* Punkt 6: Centrowanie przycisków */
+        div[data-testid="column"] { display: flex; justify-content: center; } 
         .stButton>button { border-radius: 8px; width: 100%; }
         .metric-card { 
             background-color: #f8f9fa; padding: 12px; border-radius: 10px; 
@@ -40,7 +40,9 @@ def get_lat_lng(addr):
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
     
-    # Inicjalizacja pustych pól dla punktów technicznych (Start/Meta)
+    # LICZENIE UNIKALNYCH LOKALIZACJI (STOPY)
+    unique_stops = len(set(zip(df_points['lat'], df_points['lng'])))
+    
     base_p = {
         "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": "", 
         "MIEJSC_DORECZ": "", "ULICA_DORECZ": "", "NR_DOM_DORECZ": "", "FORMAT": ""
@@ -53,7 +55,6 @@ def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label=
     route = [curr_p]
     unv = df_points.to_dict('records')
     while unv:
-        # math.sqrt jest OK, ale dla precyzji przy dużych odległościach można użyć samej sumy kwadratów (jest szybciej)
         nxt = min(unv, key=lambda x: (curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2)
         route.append(nxt); curr_p = nxt; unv.remove(nxt)
     
@@ -69,7 +70,15 @@ def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label=
                 dist += r['routes'][0]['distance']; dur += r['routes'][0]['duration']
         except: pass
     
-    return {"geom": geom, "color": COLORS[color_idx % len(COLORS)], "dist": dist, "time": dur, "pts_count": len(df_points), "df": pd.DataFrame(route)}
+    return {
+        "geom": geom, 
+        "color": COLORS[color_idx % len(COLORS)], 
+        "dist": dist, 
+        "time": dur, 
+        "paczki_count": len(df_points), 
+        "stopy_count": unique_stops,
+        "df": pd.DataFrame(route)
+    }
 
 # --- FUNKCJE SYNC ---
 def get_gspread_client():
@@ -82,44 +91,30 @@ def sync_save():
     try:
         if not st.session_state['projects'] and not st.session_state['saved_locations']:
             return
-
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        
-        # 1. ZAPIS BAZ
         l_sh = sheet.worksheet("SavedLocations")
         l_values = [["Nazwa", "Adres"]] + [[str(n), str(a)] for n, a in st.session_state['saved_locations'].items()]
         l_sh.clear()
         l_sh.update(values=l_values, range_name='A1', value_input_option='RAW')
-        
-        # 2. ZAPIS PROJEKTÓW - TYLKO DANE WEJŚCIOWE
         p_sh = sheet.worksheet("Projects")
         p_rows = [["Nazwa Projektu", "Dane JSON"]]
-        
         for p_n, p_d in st.session_state['projects'].items():
-            # Wyciągamy tylko surowe dane z KMLi (DataFrame) i ustawienia punktów
             minimal_data = {
                 'start_name': p_d.get('start_name'),
                 'meta_name': p_d.get('meta_name'),
                 'start_coords': p_d.get('start_coords'),
                 'meta_coords': p_d.get('meta_coords'),
                 'last_modified': p_d.get('last_modified'),
-                # Zapisujemy DataFrame jako listę list (dużo lżejsze niż JSON)
                 'data_values': p_d['data'].values.tolist(),
                 'data_cols': p_d['data'].columns.tolist()
             }
-            
-            # Kompresja zlib (level 9 - max)
             json_str = json.dumps(minimal_data, ensure_ascii=False)
             compressed = base64.b64encode(zlib.compress(json_str.encode('utf-8'), 9)).decode()
-            
             p_rows.append([str(p_n), compressed])
-
-        # Czyścimy stare i wrzucamy nowe "lekkie" projekty
         p_sh.clear()
         p_sh.update(values=p_rows, range_name='A1', value_input_option='RAW')
         st.toast("Projekt zapisany pomyślnie! ✅")
-        
     except Exception as e: 
         st.error(f"Błąd zapisu do chmury: {str(e)}")
 
@@ -127,37 +122,26 @@ def sync_load():
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(SHEET_ID)
-        
-        # Wczytywanie Lokalizacji
         loc_data = sheet.worksheet("SavedLocations").get_all_records()
         st.session_state['saved_locations'] = {r['Nazwa']: r['Adres'] for r in loc_data if 'Nazwa' in r}
-        
-        # Wczytywanie Projektów
         proj_data = sheet.worksheet("Projects").get_all_records()
         loaded = {}
         for r in proj_data:
             p_n, p_j = r.get('Nazwa Projektu'), r.get('Dane JSON')
             if p_n and p_j:
                 try:
-                    # Rozpakowanie danych
                     raw = zlib.decompress(base64.b64decode(p_j))
                     d = json.loads(raw)
-                    
-                    # Odtworzenie DataFrame (dzięki temu KML-e wrócą na listę)
                     if 'data_values' in d:
                         d['data'] = pd.DataFrame(d['data_values'], columns=d['data_cols'])
                         del d['data_values']; del d['data_cols']
-                    
-                    # Przygotowanie miejsca na przeliczenie trasy
                     d['optimized_cache'] = {}
                     loaded[str(p_n)] = d
                 except: continue
         st.session_state['projects'] = loaded
-    except Exception as e:
-        pass
+    except: pass
 
 def recalculate_all():
-    # Punkt 1: Indykator przeliczania
     with st.spinner("Przeliczanie tras..."):
         if not st.session_state['data'].empty and st.session_state['start_coords']:
             new_cache = {}
@@ -183,7 +167,6 @@ def modal_projects():
                 recalculate_all()
                 st.session_state['map_bounds'] = None; st.rerun()
     with tab_save:
-        # Punkt 4: Walidacja zapisu i nadpisywania
         n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
         if st.button("Zapisz projekt", use_container_width=True):
             if not n.strip(): st.error("Nazwa projektu nie może być pusta!")
@@ -192,7 +175,6 @@ def modal_projects():
                 now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
                 sync_save(); st.rerun()
-        
         if st.session_state.get('overwrite_confirm') == n:
             st.warning(f"Projekt o nazwie '{n}' już istnieje. Nadpisać?")
             if st.button("TAK, NADPISZ", type="primary", use_container_width=True):
@@ -221,7 +203,6 @@ def modal_files_kml():
     st.subheader("Wgraj nowe")
     up = st.file_uploader("Wgraj pliki KML", accept_multiple_files=True)
     if st.button("Oblicz i dodaj", use_container_width=True) and up:
-        # Punkt 1: Indykator przeliczania
         with st.spinner("Przetwarzanie plików..."):
             for f in up:
                 content = f.read().decode('utf-8')
@@ -240,7 +221,7 @@ def modal_files_kml():
                         "source_file": f.name, 
                         "NR_REJONU": rej, 
                         "PNA_DORECZ": get_val("PNA_DORECZ"),
-                        "NR_PRZ": get_val("NR_PRZ"),  # <--- TA LINIA BYŁA POTRZEBNA
+                        "NR_PRZ": get_val("NR_PRZ"), 
                         "TYP_PRZ": get_val("TYP_PRZ"), 
                         "FORMAT": get_val("FORMAT"), 
                         "Powiat": get_val("Powiat"),
@@ -305,7 +286,6 @@ if c[2].button("🏠 Bazy", use_container_width=True):
                 if st.button("Usuń", type="primary", use_container_width=True): del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
     modal_bases()
 
-# Punkt 5: Potwierdzenie czyszczenia
 if c[3].button("🗑️ Wyczyść", use_container_width=True):
     st.session_state['clear_confirm'] = True
 if st.session_state.get('clear_confirm'):
@@ -356,7 +336,7 @@ if not st.session_state['data'].empty:
     with col_main:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
-        active_bounds = [] # Punkt 2: Dynamiczne granice
+        active_bounds = [] 
         
         if st.session_state['start_coords']: folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip=st.session_state['start_name']).add_to(m)
         if st.session_state['meta_coords']: folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa'), tooltip=st.session_state['meta_name']).add_to(m)
@@ -369,7 +349,6 @@ if not st.session_state['data'].empty:
                 if res:
                     display_routes["Wszystkie zaznaczone"] = res
                     folium.PolyLine([[c[1], c[0]] for c in res['geom']], color=res['color'], weight=5).add_to(m)
-                    # Punkt 2: Zawsze dodawaj geometrię trasy do granic mapy
                     for c in res['geom']: active_bounds.append([c[1], c[0]])
         else:
             for i, r_n in enumerate(v_f):
@@ -385,7 +364,7 @@ if not st.session_state['data'].empty:
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     f_color = COLOR_MAP.get(COLORS[i % len(COLORS)], 'blue')
                     for _, r in pts.iterrows():
-                        html = f"<div style='min-width:200px; font-size:12px;'><b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>PNA:</b> {r.get('PNA_DORECZ','-')}<br><b>Powiat:</b> {r.get('Powiat','-')}<br><b>Gmina:</b> {r.get('Gmina','-')}<br><b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br><br><a href='?delete_pin={r['id']}' target='_self'><button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button></a></div>"
+                        html = f"<div style='min-width:200px; font-size:12px;'><b>Przesyłka: {r.get('NR_PRZ','-')}</b><br><b>Typ:</b> {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})<br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>PNA:</b> {r.get('PNA_DORECZ','-')}<br><b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br><br><a href='?delete_pin={r['id']}' target='_self'><button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button></a></div>"
                         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
                         active_bounds.append([r['lat'], r['lng']])
 
@@ -402,7 +381,15 @@ if not st.session_state['data'].empty:
                 if i + j < len(r_names):
                     name = r_names[i + j]; data = display_routes[name]
                     with m_cols[j]:
-                        st.markdown(f'<div class="metric-card" style="border-left-color: {data["color"]};"><div class="metric-title">📍 {name}</div><div class="metric-row">📏 {data["dist"]/1000:.2f} km</div><div class="metric-row">⏱️ {int(data["time"]//60)} min</div><div class="metric-row">📦 Punkty: {data["pts_count"]}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f"""
+                            <div class="metric-card" style="border-left-color: {data['color']};">
+                                <div class="metric-title">📍 {name}</div>
+                                <div class="metric-row">📏 {data['dist']/1000:.2f} km</div>
+                                <div class="metric-row">⏱️ {int(data['time']//60)} min</div>
+                                <div class="metric-row">📦 Paczki: {data['paczki_count']}</div>
+                                <div class="metric-row">🚶 Stopy: {data['stopy_count']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
         
         st.divider()
         st.markdown("### 📝 Harmonogramy")
@@ -419,21 +406,13 @@ if not st.session_state['data'].empty:
                         baza_n = st.session_state['meta_name']
                         baza_a = st.session_state['saved_locations'].get(baza_n, "")
                         return f"🏁 {baza_n} — {baza_a}"
-                    
-                    parts = [
-                        str(row.get('PNA_DORECZ', '')),
-                        str(row.get('MIEJSC_DORECZ', '')),
-                        str(row.get('ULICA_DORECZ', '')),
-                        str(row.get('NR_DOM_DORECZ', ''))
-                    ]
+                    parts = [str(row.get('PNA_DORECZ', '')), str(row.get('MIEJSC_DORECZ', '')), str(row.get('ULICA_DORECZ', '')), str(row.get('NR_DOM_DORECZ', ''))]
                     return " ".join([p for p in parts if p.strip() and p not in ['None', '-', 'nan']])
 
                 total_rows = len(df_res)
                 formatted_data = []
-                
                 for i, (_, row) in enumerate(df_res.iterrows()):
                     is_edge = (i == 0 or i == total_rows - 1)
-                    
                     formatted_data.append({
                         'Kolejność': i + 1,
                         'Rejon': "-" if is_edge else row.get('NR_REJONU', '-'),
@@ -441,22 +420,9 @@ if not st.session_state['data'].empty:
                         'Przesyłka': "-" if is_edge else row.get('NR_PRZ', '-'),
                         'FORMAT': "-" if is_edge else row.get('FORMAT', '-')
                     })
-                
                 df_final = pd.DataFrame(formatted_data)
-                
-                # Wyświetlenie tabeli
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
-                
-                # PRZYCISK KOPIOWANIA (Czysty tekst do Excela)
-                # Tworzymy tekst, gdzie kolumny są oddzielone tabulatorem (\t)
                 clean_text = df_final.to_csv(index=False, sep='\t')
-                
-                st.download_button(
-                    label="📋 KOPIUJ DO EXCELA (Pobierz tekst)",
-                    data=clean_text,
-                    file_name=f"tabela_{name}.txt",
-                    mime="text/plain",
-                    help="Pobierz plik, otwórz go (np. w Notatniku), naciśnij Ctrl+A, Ctrl+C i wklej do Excela."
-                )
+                st.download_button(label="📋 KOPIUJ DO EXCELA (Pobierz tekst)", data=clean_text, file_name=f"tabela_{name}.txt", mime="text/plain")
 else:
-    st.info("Wybierz punkt startowy i końcowy z listy (możesz dodać własne w menu Bazy), a następnie wgraj pliki KML w menu 'Pliki KML'.")
+    st.info("Wybierz punkt startowy i końcowy z listy, a następnie wgraj pliki KML.")
