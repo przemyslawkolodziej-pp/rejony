@@ -32,7 +32,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v224_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v225_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -230,7 +230,8 @@ if c[3].button("🗑️ Wyczyść", use_container_width=True):
     st.rerun()
 if c[4].button("🔓 Wyloguj", use_container_width=True): st.query_params.clear(); st.session_state.clear(); st.rerun()
 
-st.markdown("---")
+st.divider()
+
 bl = sorted(list(st.session_state['saved_locations'].keys()))
 c1, c2 = st.columns(2)
 with c1:
@@ -246,12 +247,17 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
         st.session_state['map_bounds'] = None; st.rerun()
 
-# --- 6. MAPA I WYBÓR TRYBU ---
+# --- 6. GŁÓWNA SEKCJA MAPY ---
 if not st.session_state['data'].empty:
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    # TRYB ZGODNY ZE SCREENEM (HORYZONTALNE RADIO)
-    opt_mode = st.radio("Tryb:", ["Jedna trasa", "Oddzielne"], horizontal=True, index=1)
+    # WYBÓR TRYBU TWORZENIA TRASY (Zgodnie z Twoją treścią i formatem radio)
+    route_mode = st.radio(
+        "Wybór trybu tworzenia trasy:", 
+        ["Jedna trasa (punkty ze wszystkich rejonów razem)", "Oddzielne trasy (punkty dla każdego rejonu oddzielnie)"],
+        horizontal=True,
+        index=1
+    )
 
     col_list, col_main = st.columns([1, 3.5])
     v_f = []
@@ -266,6 +272,8 @@ if not st.session_state['data'].empty:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
         active_bounds = []
+        
+        # Bazy
         if st.session_state['start_coords']:
             folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip=st.session_state['start_name']).add_to(m)
             active_bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
@@ -283,7 +291,7 @@ if not st.session_state['data'].empty:
                     f_color = COLOR_MAP.get(cache['color'], 'blue')
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     for _, r in pts.iterrows():
-                        # Pełny opis pinezki
+                        # OPIS PINEZKI ZGODNY Z WYMAGANIAMI
                         html = f"""
                         <div style='min-width:200px; font-size:12px;'>
                             <b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br>
@@ -303,7 +311,7 @@ if not st.session_state['data'].empty:
         elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
         st_folium(m, width="100%", height=600, key="main_map")
 
-    # --- PODSUMOWANIE SZCZEGÓŁOWE ---
+    # --- PODSUMOWANIE I TABELE NA DOLE ---
     if active_routes:
         st.markdown("### 📊 Podsumowanie tras")
         r_names = list(active_routes.keys())
@@ -323,13 +331,13 @@ if not st.session_state['data'].empty:
                             </div>
                         """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.markdown("### 📝 Listy punktów (Harmonogram)")
+        st.divider()
+        st.markdown("### 📝 Harmonogramy (Listy punktów)")
         for name in r_names:
             data = active_routes[name]
-            with st.expander(f"Rozwiń listę punktów dla: {name}"):
+            with st.expander(f"Rozwiń listę punktów dla rejonu: {name}"):
                 df_v = data['df'].copy()
                 cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ'] if c in df_v.columns]
                 st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
 else:
-    st.info("Wgraj pliki KML.")
+    st.info("Wgraj pliki KML, aby rozpocząć optymalizację.")
