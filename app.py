@@ -19,7 +19,8 @@ COLOR_MAP = {
 
 st.markdown("""
     <style>
-        .stButton>button { border-radius: 8px; }
+        div[data-testid="column"] { display: flex; justify-content: center; } /* Punkt 6: Centrowanie przycisków */
+        .stButton>button { border-radius: 8px; width: 100%; }
         .metric-card { 
             background-color: #f8f9fa; padding: 12px; border-radius: 10px; 
             box-shadow: 2px 2px 5px rgba(0,0,0,0.05); margin-bottom: 15px; border-left: 8px solid;
@@ -32,24 +33,20 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="v227_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="v228_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
-    
     start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"}
     meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], "NR_REJONU": "-", "PNA_DORECZ": "-"}
-    
     curr_p = start_p
     route = [curr_p]
     unv = df_points.to_dict('records')
-    
     while unv:
         nxt = min(unv, key=lambda x: math.sqrt((curr_p['lat']-x['lat'])**2 + (curr_p['lng']-x['lng'])**2))
         route.append(nxt); curr_p = nxt; unv.remove(nxt)
-        
     route.append(meta_p)
     coords = [[r['lat'], r['lng']] for r in route]
     geom, dist, dur = [], 0, 0
@@ -115,13 +112,15 @@ def sync_load():
     except: pass
 
 def recalculate_all():
-    if not st.session_state['data'].empty and st.session_state['start_coords']:
-        new_cache = {}
-        all_files = sorted(st.session_state['data']['source_file'].unique().tolist())
-        for i, f_name in enumerate(all_files):
-            df_f = st.session_state['data'][st.session_state['data']['source_file'] == f_name]
-            new_cache[f_name] = optimize_route(df_f, st.session_state['start_coords'], st.session_state['meta_coords'], i, st.session_state['start_name'], st.session_state['meta_name'])
-        st.session_state['optimized_cache'] = new_cache
+    # Punkt 1: Indykator przeliczania
+    with st.spinner("Przeliczanie tras..."):
+        if not st.session_state['data'].empty and st.session_state['start_coords']:
+            new_cache = {}
+            all_files = sorted(st.session_state['data']['source_file'].unique().tolist())
+            for i, f_name in enumerate(all_files):
+                df_f = st.session_state['data'][st.session_state['data']['source_file'] == f_name]
+                new_cache[f_name] = optimize_route(df_f, st.session_state['start_coords'], st.session_state['meta_coords'], i, st.session_state['start_name'], st.session_state['meta_name'])
+            st.session_state['optimized_cache'] = new_cache
 
 # --- 3. MODALE ---
 @st.dialog("Zarządzaj Projektami")
@@ -139,11 +138,24 @@ def modal_projects():
                 recalculate_all()
                 st.session_state['map_bounds'] = None; st.rerun()
     with tab_save:
+        # Punkt 4: Walidacja zapisu i nadpisywania
         n = st.text_input("Nazwa:", value=st.session_state.get('last_loaded_project_name', ""))
-        if n and st.button("Zapisz projekt", use_container_width=True):
-            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
-            sync_save(); st.rerun()
+        if st.button("Zapisz projekt", use_container_width=True):
+            if not n.strip(): st.error("Nazwa projektu nie może być pusta!")
+            elif n in st.session_state['projects']: st.session_state['overwrite_confirm'] = n
+            else:
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
+                sync_save(); st.rerun()
+        
+        if st.session_state.get('overwrite_confirm') == n:
+            st.warning(f"Projekt o nazwie '{n}' już istnieje. Nadpisać?")
+            if st.button("TAK, NUDPISZ", type="primary", use_container_width=True):
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
+                st.session_state['overwrite_confirm'] = None
+                sync_save(); st.rerun()
+
     with tab_del:
         if not proj_list: st.info("Brak projektów.")
         else:
@@ -161,38 +173,35 @@ def modal_projects():
 def modal_files_kml():
     if not st.session_state['start_coords'] or not st.session_state['meta_coords']:
         st.error("Wybierz START i METĘ!"); return
-    
     st.subheader("Wgraj nowe")
     up = st.file_uploader("Wgraj pliki KML", accept_multiple_files=True)
     if st.button("Oblicz i dodaj", use_container_width=True) and up:
-        for f in up:
-            content = f.read().decode('utf-8')
-            pts = []
-            for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
-                coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
-                def get_val(key):
-                    m = re.search(rf'<Data name="{key}">\s*<value>(.*?)</value>', pm, re.DOTALL)
-                    return m.group(1).strip() if m else ""
-                
-                rej = get_val("NR_REJONU") or get_val("JEDNOSTKA_DOR")
-                if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
-                
-                pts.append({
-                    "id": hashlib.md5(f"{f.name}{coords.group(0) if coords else time.time()}".encode()).hexdigest(),
-                    "display_name": f"{get_val('ULICA_DORECZ')} {get_val('NR_DOM_DORECZ')}".strip(), 
-                    "lat": float(coords.group(2)) if coords else 0, "lng": float(coords.group(1)) if coords else 0, 
-                    "source_file": f.name, "NR_REJONU": rej, "PNA_DORECZ": get_val("PNA_DORECZ"),
-                    "TYP_PRZ": get_val("TYP_PRZ"), "FORMAT": get_val("FORMAT"), "Powiat": get_val("Powiat"),
-                    "Gmina": get_val("Gmina"), "MIEJSC_DORECZ": get_val("MIEJSC_DORECZ"), 
-                    "ULICA_DORECZ": get_val("ULICA_DORECZ"), "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ")
-                })
-            if pts:
-                st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
+        # Punkt 1: Indykator przeliczania
+        with st.spinner("Przetwarzanie plików..."):
+            for f in up:
+                content = f.read().decode('utf-8')
+                pts = []
+                for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
+                    coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
+                    def get_val(key):
+                        m = re.search(rf'<Data name="{key}">\s*<value>(.*?)</value>', pm, re.DOTALL)
+                        return m.group(1).strip() if m else ""
+                    rej = get_val("NR_REJONU") or get_val("JEDNOSTKA_DOR")
+                    if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
+                    pts.append({
+                        "id": hashlib.md5(f"{f.name}{coords.group(0) if coords else time.time()}".encode()).hexdigest(),
+                        "display_name": f"{get_val('ULICA_DORECZ')} {get_val('NR_DOM_DORECZ')}".strip(), 
+                        "lat": float(coords.group(2)) if coords else 0, "lng": float(coords.group(1)) if coords else 0, 
+                        "source_file": f.name, "NR_REJONU": rej, "PNA_DORECZ": get_val("PNA_DORECZ"),
+                        "TYP_PRZ": get_val("TYP_PRZ"), "FORMAT": get_val("FORMAT"), "Powiat": get_val("Powiat"),
+                        "Gmina": get_val("Gmina"), "MIEJSC_DORECZ": get_val("MIEJSC_DORECZ"), 
+                        "ULICA_DORECZ": get_val("ULICA_DORECZ"), "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ")
+                    })
+                if pts:
+                    st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
         recalculate_all(); st.session_state['map_bounds'] = None; st.rerun()
-    
     if not st.session_state['data'].empty:
-        st.divider()
-        st.subheader("Zarządzaj wgranymi")
+        st.divider(); st.subheader("Zarządzaj wgranymi")
         all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
         for f_name in all_f:
             c1, c2 = st.columns([3, 1])
@@ -222,7 +231,6 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# Obsługa usuwania pojedynczej pinezki z mapy
 if "delete_pin" in st.query_params:
     pin_id = st.query_params["delete_pin"]
     st.session_state['data'] = st.session_state['data'][st.session_state['data']['id'] != pin_id]
@@ -244,13 +252,24 @@ if c[2].button("🏠 Bazy", use_container_width=True):
                 sel = st.selectbox("Wybierz:", sorted(st.session_state['saved_locations'].keys()))
                 if st.button("Usuń", type="primary", use_container_width=True): del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
     modal_bases()
+
+# Punkt 5: Potwierdzenie czyszczenia
 if c[3].button("🗑️ Wyczyść", use_container_width=True):
-    st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'map_bounds': None})
-    st.rerun()
+    st.session_state['clear_confirm'] = True
+if st.session_state.get('clear_confirm'):
+    @st.dialog("Potwierdź czyszczenie")
+    def confirm_clear():
+        st.warning("Czy na pewno chcesz wyczyścić bieżący postęp pracy?")
+        if st.button("TAK, WYCZYŚĆ", type="primary", use_container_width=True):
+            st.session_state.update({'data': pd.DataFrame(), 'optimized_cache': {}, 'start_name': "---", 'meta_name': "---", 'start_coords': None, 'meta_coords': None, 'map_bounds': None, 'clear_confirm': False})
+            st.rerun()
+        if st.button("Anuluj", use_container_width=True):
+            st.session_state['clear_confirm'] = False; st.rerun()
+    confirm_clear()
+
 if c[4].button("🔓 Wyloguj", use_container_width=True): st.query_params.clear(); st.session_state.clear(); st.rerun()
 
 st.divider()
-
 bl = sorted(list(st.session_state['saved_locations'].keys()))
 c1, c2 = st.columns(2)
 with c1:
@@ -285,15 +304,10 @@ if not st.session_state['data'].empty:
     with col_main:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
-        active_bounds = []
+        active_bounds = [] # Punkt 2: Dynamiczne granice
         
-        # Start/Meta Markers
-        if st.session_state['start_coords']:
-            folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip=st.session_state['start_name']).add_to(m)
-            active_bounds.append([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']])
-        if st.session_state['meta_coords']:
-            folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa'), tooltip=st.session_state['meta_name']).add_to(m)
-            active_bounds.append([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']])
+        if st.session_state['start_coords']: folium.Marker([st.session_state['start_coords']['lat'], st.session_state['start_coords']['lng']], icon=folium.Icon(color='green', icon='play', prefix='fa'), tooltip=st.session_state['start_name']).add_to(m)
+        if st.session_state['meta_coords']: folium.Marker([st.session_state['meta_coords']['lat'], st.session_state['meta_coords']['lng']], icon=folium.Icon(color='red', icon='stop', prefix='fa'), tooltip=st.session_state['meta_name']).add_to(m)
             
         display_routes = {}
         if "Jedna trasa" in route_mode:
@@ -303,41 +317,27 @@ if not st.session_state['data'].empty:
                 if res:
                     display_routes["Wszystkie zaznaczone"] = res
                     folium.PolyLine([[c[1], c[0]] for c in res['geom']], color=res['color'], weight=5).add_to(m)
+                    # Punkt 2: Zawsze dodawaj geometrię trasy do granic mapy
+                    for c in res['geom']: active_bounds.append([c[1], c[0]])
         else:
             for i, r_n in enumerate(v_f):
                 cache = st.session_state['optimized_cache'].get(r_n)
                 if cache and 'geom' in cache:
                     display_routes[r_n] = cache
                     folium.PolyLine([[c[1], c[0]] for c in cache['geom']], color=cache['color'], weight=5).add_to(m)
+                    for c in cache['geom']: active_bounds.append([c[1], c[0]])
 
-        # Rysowanie pinezek (zawsze w kolorach rejonów)
         if show_pins:
             for i, r_n in enumerate(all_f):
                 if r_n in v_f:
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     f_color = COLOR_MAP.get(COLORS[i % len(COLORS)], 'blue')
                     for _, r in pts.iterrows():
-                        # Pełny opis pinezki + przycisk usuwania (JS hack dla Streamlit)
-                        html = f"""
-                        <div style='min-width:200px; font-size:12px;'>
-                            <b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br>
-                            <b>Rejon:</b> {r.get('NR_REJONU','-')}<br>
-                            <b>PNA:</b> {r.get('PNA_DORECZ','-')}<br>
-                            <b>Powiat:</b> {r.get('Powiat','-')}<br>
-                            <b>Gmina:</b> {r.get('Gmina','-')}<br>
-                            <b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br>
-                            <b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br><br>
-                            <a href='?delete_pin={r['id']}' target='_self'>
-                                <button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button>
-                            </a>
-                        </div>
-                        """
+                        html = f"<div style='min-width:200px; font-size:12px;'><b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>PNA:</b> {r.get('PNA_DORECZ','-')}<br><b>Powiat:</b> {r.get('Powiat','-')}<br><b>Gmina:</b> {r.get('Gmina','-')}<br><b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br><br><a href='?delete_pin={r['id']}' target='_self'><button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button></a></div>"
                         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
                         active_bounds.append([r['lat'], r['lng']])
 
-        if active_bounds and st.session_state['map_bounds'] is None:
-            m.fit_bounds(active_bounds)
-        elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
+        if active_bounds: m.fit_bounds(active_bounds)
         st_folium(m, width="100%", height=600, key="main_map")
 
     # --- PODSUMOWANIE ---
@@ -355,6 +355,10 @@ if not st.session_state['data'].empty:
         st.markdown("### 📝 Harmonogramy")
         for name in r_names:
             with st.expander(f"Lista dla: {name}"):
-                st.dataframe(display_routes[name]['df'][['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ']], use_container_width=True, hide_index=True)
+                df_to_show = display_routes[name]['df'][['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ']]
+                # Punkt 3: Przycisk kopiowania danych
+                st.dataframe(df_to_show, use_container_width=True, hide_index=True)
+                csv = df_to_show.to_csv(index=False, sep='\t').encode('utf-8')
+                st.download_button("📋 Skopiuj dane (Pobierz jako TSV/Excel)", data=csv, file_name=f"harmonogram_{name}.xls", mime="application/vnd.ms-excel", key=f"btn_copy_{name}")
 else:
     st.info("Wgraj pliki KML w menu 'Pliki KML'.")
