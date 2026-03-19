@@ -32,7 +32,7 @@ st.markdown("""
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
-        loc = Nominatim(user_agent="gemini_v220_opt").geocode(addr, timeout=10)
+        loc = Nominatim(user_agent="gemini_v221_opt").geocode(addr, timeout=10)
         return {"lat": loc.latitude, "lng": loc.longitude} if loc else None
     except: return None
 
@@ -153,18 +153,23 @@ def modal_add_kml():
             for pm in re.findall(r'<Placemark>(.*?)</Placemark>', content, re.DOTALL):
                 coords = re.search(r'<coordinates>\s*([\d\.\-]+),\s*([\d\.\-]+)', pm)
                 
-                # Poprawiony Regex: DOTALL + obsługa spacji
                 def get_val(key):
                     m = re.search(rf'<Data name="{key}">\s*<value>(.*?)</value>', pm, re.DOTALL)
-                    return m.group(1).strip() if m else None
+                    return m.group(1).strip() if m else ""
 
+                # Pobieranie wszystkich pól potrzebnych do opisu
                 rej = get_val("NR_REJONU") or get_val("JEDNOSTKA_DOR")
+                if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
+                
                 pna = get_val("PNA_DORECZ")
+                typ_prz = get_val("TYP_PRZ")
+                format_prz = get_val("FORMAT")
+                powiat = get_val("Powiat")
+                gmina = get_val("Gmina")
+                miejsc = get_val("MIEJSC_DORECZ")
                 ulica = get_val("ULICA_DORECZ")
                 nr_dom = get_val("NR_DOM_DORECZ")
 
-                if rej and ".0" in str(rej): rej = str(rej).replace(".0", "")
-                
                 full_adr = f"{ulica} {nr_dom}".strip()
                 if not ulica or full_adr == "" or full_adr == "None":
                     name_t = re.search(r'<name>(.*?)</name>', pm)
@@ -173,7 +178,9 @@ def modal_add_kml():
                 if coords:
                     pts.append({
                         "display_name": full_adr, "lat": float(coords.group(2)), "lng": float(coords.group(1)), 
-                        "source_file": f.name, "NR_REJONU": rej if rej else "n/a", "PNA_DORECZ": pna if pna else "n/a"
+                        "source_file": f.name, "NR_REJONU": rej, "PNA_DORECZ": pna,
+                        "TYP_PRZ": typ_prz, "FORMAT": format_prz, "Powiat": powiat,
+                        "Gmina": gmina, "MIEJSC_DORECZ": miejsc, "ULICA_DORECZ": ulica, "NR_DOM_DORECZ": nr_dom
                     })
             if pts:
                 df_new = pd.DataFrame(pts)
@@ -203,7 +210,7 @@ if not check_auth():
                 st.session_state['authenticated'] = True; sync_load(); st.rerun()
     st.stop()
 
-# --- 5. INTERFEJS ---
+# --- 5. INTERFEJS GÓRNY ---
 c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
 if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Dodaj KML", use_container_width=True): modal_add_kml()
@@ -240,20 +247,15 @@ with c2:
         st.session_state['meta_coords'] = get_lat_lng(st.session_state['saved_locations'][m_s]) if m_s != "---" else None
         st.session_state['map_bounds'] = None; st.rerun()
 
-# --- 6. GŁÓWNA MAPA I PODSUMOWANIE ---
+# --- 6. GŁÓWNA MAPA I TRYB ---
 if not st.session_state['data'].empty:
     v_f = []
     all_f = sorted(st.session_state['data']['source_file'].unique().tolist())
     
-    col_list, col_main = st.columns([1, 3.5])
-    with col_list:
-        # Multiselect / Tryb Rejonów
-        st.markdown("### Rejony")
-        with st.container(height=500):
-            for r_n in all_f:
-                if st.checkbox(r_n, value=True, key=f"v_{r_n}"): v_f.append(r_n)
-                st.divider()
+    # WYBÓR TRYBU / REJONÓW NAD MAPĄ
+    v_f = st.multiselect("Wybierz rejony do wyświetlenia:", all_f, default=all_f)
 
+    col_list, col_main = st.columns([0.1, 4.5]) # Lista przeniesiona do multiselecta, zostawiamy miejsce
     with col_main:
         show_pins = st.checkbox("Pokaż pinezki", value=True)
         m = folium.Map()
@@ -275,23 +277,32 @@ if not st.session_state['data'].empty:
                     f_color = COLOR_MAP.get(cache['color'], 'blue')
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     for _, r in pts.iterrows():
-                        d_n = r.get('display_name', 'Punkt')
-                        rej = r.get('NR_REJONU', 'n/a')
-                        pna = r.get('PNA_DORECZ', 'n/a')
-                        html = f"<div style='min-width:150px;'><b>{d_n}</b><br>REJON: {rej}<br>PNA: {pna}</div>"
-                        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html)).add_to(m)
+                        # NOWY OPIS PINEZKI
+                        html = f"""
+                        <div style='min-width:200px; font-size:12px;'>
+                            <b>Przesyłka: {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})</b><br>
+                            <b>Rejon:</b> {r.get('NR_REJONU','-')}<br>
+                            <b>PNA:</b> {r.get('PNA_DORECZ','-')}<br>
+                            <b>Powiat:</b> {r.get('Powiat','-')}<br>
+                            <b>Gmina:</b> {r.get('Gmina','-')}<br>
+                            <b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br>
+                            <b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}
+                        </div>
+                        """
+                        folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
                         active_bounds.append([r['lat'], r['lng']])
 
         if active_bounds and st.session_state['map_bounds'] is None:
             st.session_state['map_bounds'] = active_bounds; m.fit_bounds(active_bounds)
         elif st.session_state['map_bounds']: m.fit_bounds(st.session_state['map_bounds'])
-        st_folium(m, width="100%", height=550, key="main_map")
+        st_folium(m, width="100%", height=600, key="main_map")
 
-    # --- PODSUMOWANIE SZCZEGÓŁOWE (METRYKI I TABELE) ---
+    # --- PODSUMOWANIE SZCZEGÓŁOWE ---
     if active_routes:
-        st.markdown("### 📊 Szczegóły tras")
+        st.markdown("### 📊 Podsumowanie tras")
         r_names = list(active_routes.keys())
-        # Wyświetlanie kart z metrykami w rzędach po 3
+        
+        # 1. Karty z metrykami
         for i in range(0, len(r_names), 3):
             m_cols = st.columns(3)
             for j in range(3):
@@ -307,9 +318,16 @@ if not st.session_state['data'].empty:
                                 <div class="metric-row">📦 Punkty: {data['pts_count']}</div>
                             </div>
                         """, unsafe_allow_html=True)
-                        with st.expander("Lista punktów"):
-                            df_v = data['df'].copy()
-                            cols = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ'] if c in df_v.columns]
-                            st.dataframe(df_v[cols], use_container_width=True, hide_index=True)
+
+        # 2. Tabele z listą punktów (pod wszystkimi kartami)
+        st.markdown("---")
+        st.markdown("### 📝 Listy punktów (Harmonogram)")
+        for name in r_names:
+            data = active_routes[name]
+            with st.expander(f"Rozwiń listę punktów dla: {name}"):
+                df_v = data['df'].copy()
+                # Wybieramy kolumny do tabeli
+                cols_to_show = [c for c in ['display_name', 'NR_REJONU', 'PNA_DORECZ', 'MIEJSC_DORECZ', 'TYP_PRZ'] if c in df_v.columns]
+                st.dataframe(df_v[cols_to_show], use_container_width=True, hide_index=True)
 else:
     st.info("Wgraj pliki KML.")
