@@ -40,7 +40,7 @@ def get_lat_lng(addr):
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
     
-    # Dodajemy wszystkie klucze, by DataFrame był spójny
+    # Inicjalizacja pustych pól dla punktów technicznych (Start/Meta)
     base_p = {
         "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": "", 
         "MIEJSC_DORECZ": "", "ULICA_DORECZ": "", "NR_DOM_DORECZ": "", "FORMAT": ""
@@ -48,7 +48,7 @@ def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label=
     
     start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], **base_p}
     meta_p = {"display_name": f"🏁 {meta_label}", "lat": meta_coords['lat'], "lng": meta_coords['lng'], **base_p}
-    
+        
     curr_p = start_p
     route = [curr_p]
     unv = df_points.to_dict('records')
@@ -237,10 +237,17 @@ def modal_files_kml():
                         "id": hashlib.md5(f"{f.name}{coords.group(0) if coords else time.time()}".encode()).hexdigest(),
                         "display_name": f"{get_val('ULICA_DORECZ')} {get_val('NR_DOM_DORECZ')}".strip(), 
                         "lat": float(coords.group(2)) if coords else 0, "lng": float(coords.group(1)) if coords else 0, 
-                        "source_file": f.name, "NR_REJONU": rej, "PNA_DORECZ": get_val("PNA_DORECZ"),
-                        "TYP_PRZ": get_val("TYP_PRZ"), "FORMAT": get_val("FORMAT"), "Powiat": get_val("Powiat"),
-                        "Gmina": get_val("Gmina"), "MIEJSC_DORECZ": get_val("MIEJSC_DORECZ"), 
-                        "ULICA_DORECZ": get_val("ULICA_DORECZ"), "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ")
+                        "source_file": f.name, 
+                        "NR_REJONU": rej, 
+                        "PNA_DORECZ": get_val("PNA_DORECZ"),
+                        "NR_PRZ": get_val("NR_PRZ"),  # <--- TA LINIA BYŁA POTRZEBNA
+                        "TYP_PRZ": get_val("TYP_PRZ"), 
+                        "FORMAT": get_val("FORMAT"), 
+                        "Powiat": get_val("Powiat"),
+                        "Gmina": get_val("Gmina"), 
+                        "MIEJSC_DORECZ": get_val("MIEJSC_DORECZ"), 
+                        "ULICA_DORECZ": get_val("ULICA_DORECZ"), 
+                        "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ")
                     })
                 if pts:
                     st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
