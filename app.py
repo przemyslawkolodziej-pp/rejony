@@ -264,13 +264,21 @@ def modal_files_kml():
 def modal_files_excel():
     if not st.session_state['start_coords'] or not st.session_state['meta_coords']:
         st.error("Najpierw wybierz START i METĘ!"); return
+    
     up = st.file_uploader("Wgraj plik Excel (.xlsx)", type=["xlsx"])
     if up:
         df_ex = pd.read_excel(up)
         cols = df_ex.columns.tolist()
+        
         st.write("### 🛠️ Konfiguracja Geokodowania")
         c1, c2, c3 = st.columns(3)
-        addr_col = c1.selectbox("Ulica i nr", cols, index=cols.index("ULICA_DORECZ") if "ULICA_DORECZ" in cols else 0)
+        
+        # ZMIANA: multiselect dla ulicy i numeru
+        addr_cols = c1.multiselect(
+            "Kolumny adresu (np. ulica + nr)", 
+            cols, 
+            default=[c for c in ["ULICA_DORECZ", "NR_DOM_DORECZ"] if c in cols] or [cols[0]]
+        )
         city_col = c2.selectbox("Miejscowość", cols, index=cols.index("MIEJSC_DORECZ") if "MIEJSC_DORECZ" in cols else 0)
         pna_col = c3.selectbox("Kolumna PNA", cols, index=cols.index("PNA_DORECZ") if "PNA_DORECZ" in cols else 0)
         
@@ -280,35 +288,46 @@ def modal_files_excel():
         if st.button("Uruchom Szybkie Geokodowanie", use_container_width=True):
             pts = []
             progress = st.progress(0)
+            status_text = st.empty()
+            
             for i, row in df_ex.iterrows():
-                ulica = clean_text_simple(row[addr_col])
+                # Łączenie wybranych kolumn adresu spacją (np. "Polna" + "12" -> "Polna 12")
+                ulica_full = " ".join([str(row[c]) for c in addr_cols if pd.notna(row[c])])
+                ulica_clean = clean_text_simple(ulica_full)
+                
                 miasto = clean_text_simple(row[city_col])
                 pna_raw = str(row[pna_col]).replace(".0", "").zfill(5)
                 pna_fmt = f"{pna_raw[:2]}-{pna_raw[2:]}" if len(pna_raw)==5 else ""
                 
                 rej_val = " | ".join([str(row[c]) for c in group_cols])
                 
-                # Kaskada
-                queries = [f"{ulica}, {pna_fmt} {miasto}, Polska", f"{ulica}, {miasto}, Polska", f"{miasto}, Polska"]
+                # Kaskada zapytań do Photona
+                queries = [
+                    f"{ulica_clean}, {pna_fmt} {miasto}, Polska", 
+                    f"{ulica_clean}, {miasto}, Polska", 
+                    f"{miasto}, Polska"
+                ]
+                
                 found_loc, res_props = None, {}
                 for q in queries:
                     try:
                         r = requests.get(f"https://photon.komoot.io/api/?q={q}&limit=1&lang=pl", timeout=5).json()
-                        if r['features']:
+                        if r.get('features'):
                             found_loc = r['features'][0]['geometry']['coordinates']
-                            res_props = r['features'][0]['properties']; break
+                            res_props = r['features'][0]['properties']
+                            break
                     except: continue
 
                 if found_loc:
                     pts.append({
-                        "id": hashlib.md5(f"{up.name}{i}".encode()).hexdigest(),
-                        "display_name": f"{ulica}, {miasto}",
+                        "id": hashlib.md5(f"{up.name}{i}{ulica_full}".encode()).hexdigest(),
+                        "display_name": f"{ulica_full}, {miasto}",
                         "lat": found_loc[1], "lng": found_loc[0],
                         "source_file": f"Excel: {up.name}",
                         "NR_REJONU": rej_val,
                         "MIEJSC_DORECZ": miasto,
-                        "ULICA_DORECZ": ulica,
-                        "NR_DOM_DORECZ": str(row.get("NR_DOM_DORECZ", "")),
+                        "ULICA_DORECZ": ulica_full, # Tutaj trafia już połączona ulica z numerem
+                        "NR_DOM_DORECZ": "", # Możesz zostawić puste, bo numer jest już w ULICA_DORECZ
                         "PNA_DORECZ": pna_fmt,
                         "NR_PRZ": str(row.get("NR_PRZ", "-")),
                         "FORMAT": str(row.get("FORMAT", "-")),
@@ -318,10 +337,14 @@ def modal_files_excel():
                         "GMINA": res_props.get('district', res_props.get('city', '-')),
                         "POWIAT": res_props.get('county', '-')
                     })
+                
                 progress.progress((i + 1) / len(df_ex))
+                status_text.text(f"Przetwarzanie: {i+1}/{len(df_ex)}")
+
             if pts:
                 st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
-                recalculate_all(); st.rerun()
+                recalculate_all()
+                st.rerun()
 
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
