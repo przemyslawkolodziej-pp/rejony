@@ -7,7 +7,7 @@ import re, math, json, requests, os, time, zlib, base64, hashlib, datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. KONFIGURACJA ---
+# --- 1. KONFIGURACJA ----
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
@@ -30,21 +30,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNKCJE POMOCNICZE (NOWE) ---
-def get_date_details(date_val):
-    try:
-        dt = pd.to_datetime(date_val)
-        dni = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
-        dzien = dni[dt.weekday()]
-        tydzien_msc = (dt.day - 1) // 7 + 1
-        return dzien, tydzien_msc
-    except:
-        return "-", "-"
-
-def clean_text_simple(text):
-    if not text or pd.isna(text): return ""
-    return re.sub(r'[^\w\s-]', '', str(text)).strip()
-
 # --- 2. FUNKCJE LOGIKI ---
 def get_lat_lng(addr):
     try:
@@ -54,12 +39,13 @@ def get_lat_lng(addr):
 
 def optimize_route(df_points, start_coords, meta_coords, color_idx, start_label="START", meta_label="META"):
     if df_points.empty or not start_coords or not meta_coords: return None
+    
+    # LICZENIE UNIKALNYCH LOKALIZACJI (STOPY)
     unique_stops = len(set(zip(df_points['lat'], df_points['lng'])))
     
     base_p = {
         "NR_REJONU": "", "PNA_DORECZ": "", "NR_PRZ": "", 
-        "MIEJSC_DORECZ": "", "ULICA_DORECZ": "", "NR_DOM_DORECZ": "", "FORMAT": "",
-        "GMINA": "-", "POWIAT": "-", "NAZWA_JD": "-", "DATA_STATUSU": ""
+        "MIEJSC_DORECZ": "", "ULICA_DORECZ": "", "NR_DOM_DORECZ": "", "FORMAT": ""
     }
     
     start_p = {"display_name": f"🏠 {start_label}", "lat": start_coords['lat'], "lng": start_coords['lng'], **base_p}
@@ -186,6 +172,7 @@ def modal_projects():
             if not n.strip(): st.error("Nazwa projektu nie może być pusta!")
             elif n in st.session_state['projects']: st.session_state['overwrite_confirm'] = n
             else:
+                # TUTAJ POPRAWKA:
                 now_str = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
                 st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
                 sync_save(); st.rerun()
@@ -193,6 +180,7 @@ def modal_projects():
         if st.session_state.get('overwrite_confirm') == n:
             st.warning(f"Projekt o nazwie '{n}' już istnieje. Nadpisać?")
             if st.button("TAK, NADPISZ", type="primary", use_container_width=True):
+                # I TUTAJ POPRAWKA:
                 now_str = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
                 st.session_state['projects'][n] = {'data': st.session_state['data'].copy(), 'start_name': st.session_state['start_name'], 'meta_name': st.session_state['meta_name'], 'start_coords': st.session_state['start_coords'], 'meta_coords': st.session_state['meta_coords'], 'optimized_cache': st.session_state['optimized_cache'].copy(), 'last_modified': now_str}
                 st.session_state['overwrite_confirm'] = None
@@ -239,13 +227,11 @@ def modal_files_kml():
                         "NR_PRZ": get_val("NR_PRZ"), 
                         "TYP_PRZ": get_val("TYP_PRZ"), 
                         "FORMAT": get_val("FORMAT"), 
-                        "POWIAT": get_val("Powiat") or "-",
-                        "GMINA": get_val("Gmina") or "-", 
+                        "Powiat": get_val("Powiat"),
+                        "Gmina": get_val("Gmina"), 
                         "MIEJSC_DORECZ": get_val("MIEJSC_DORECZ"), 
                         "ULICA_DORECZ": get_val("ULICA_DORECZ"), 
-                        "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ"),
-                        "NAZWA_JD": get_val("NAZWA_JD") or "-",
-                        "DATA_STATUSU": ""
+                        "NR_DOM_DORECZ": get_val("NR_DOM_DORECZ")
                     })
                 if pts:
                     st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
@@ -258,118 +244,6 @@ def modal_files_kml():
             c1.write(f_name)
             if c2.button("Usuń", key=f"del_file_{f_name}"):
                 st.session_state['data'] = st.session_state['data'][st.session_state['data']['source_file'] != f_name]
-                recalculate_all(); st.rerun()
-
-@st.dialog("Importuj z Excela (Photon)")
-def modal_files_excel():
-    if not st.session_state['start_coords'] or not st.session_state['meta_coords']:
-        st.error("Najpierw wybierz START i METĘ!"); return
-    
-    up = st.file_uploader("Wgraj plik Excel (.xlsx)", type=["xlsx"])
-    if up:
-        df_ex = pd.read_excel(up)
-        cols = df_ex.columns.tolist()
-        
-        st.write("### 🛠️ 1. Mapowanie kolumn")
-        c1, c2, c3 = st.columns(3)
-        addr_cols = c1.multiselect("Adres (Ulica, Nr)", cols, default=[c for c in ["ULICA_DORECZ", "NR_DOM_DORECZ"] if c in cols] or [cols[0]])
-        city_col = c2.selectbox("Miejscowość", cols, index=cols.index("MIEJSC_DORECZ") if "MIEJSC_DORECZ" in cols else 0)
-        pna_col = c3.selectbox("Kod PNA", cols, index=cols.index("PNA_DORECZ") if "PNA_DORECZ" in cols else 0)
-        
-        st.divider()
-        st.write("### 🔍 2. Filtrowanie danych (Opcjonalne)")
-        st.info("Wybierz wartości, aby ograniczyć import. Jeśli zostawisz puste -> zaimportuje wszystko.")
-        
-        f1, f2, f3 = st.columns(3)
-        
-        # --- FILTR REJONU ---
-        rej_col_name = f1.selectbox("Kolumna Rejonu:", ["---"] + cols)
-        sel_rejs = []
-        if rej_col_name != "---":
-            unique_rejs = sorted(df_ex[rej_col_name].dropna().unique().astype(str))
-            sel_rejs = f1.multiselect("Wybierz konkretne Rejony:", unique_rejs)
-            
-        # --- FILTR DNIA TYGODNIA ---
-        date_col_name = f2.selectbox("Kolumna Daty:", ["---"] + cols)
-        sel_days = []
-        if date_col_name != "---":
-            # Tymczasowo wyliczamy dni tygodnia dla unikalnych dat
-            df_temp = pd.DataFrame({'d': df_ex[date_col_name].dropna().unique()})
-            df_temp['day_name'] = df_temp['d'].apply(lambda x: get_date_details(x)[0])
-            unique_days = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
-            available_days = [d for d in unique_days if d in df_temp['day_name'].unique()]
-            sel_days = f2.multiselect("Wybierz dni tygodnia:", available_days)
-
-        # --- FILTR TYGODNIA MIESIĄCA ---
-        sel_weeks = []
-        if date_col_name != "---":
-            df_temp['week_num'] = df_temp['d'].apply(lambda x: str(get_date_details(x)[1]))
-            available_weeks = sorted(df_temp['week_num'].unique())
-            sel_weeks = f3.multiselect("Wybierz nr tygodnia:", available_weeks)
-
-        st.divider()
-        st.write("### 📂 3. Nazwa Rejonu w aplikacji")
-        group_cols = st.multiselect("Z czego zbudować nazwę wyświetlaną na mapie?", cols, default=[rej_col_name] if rej_col_name != "---" else [cols[0]])
-
-        if st.button("Uruchom Import i Geokodowanie", use_container_width=True):
-            # --- LOGIKA FILTROWANIA ---
-            df_final = df_ex.copy()
-            if sel_rejs:
-                df_final = df_final[df_final[rej_col_name].astype(str).isin(sel_rejs)]
-            
-            if date_col_name != "---" and (sel_days or sel_weeks):
-                # Dodajemy kolumny pomocnicze do filtrowania
-                df_final['_d'], df_final['_w'] = zip(*df_final[date_col_name].apply(get_date_details))
-                if sel_days:
-                    df_final = df_final[df_final['_d'].isin(sel_days)]
-                if sel_weeks:
-                    df_final = df_final[df_final['_w'].astype(str).isin(sel_weeks)]
-
-            if df_final.empty:
-                st.error("Brak danych spełniających kryteria filtrów!"); return
-
-            pts = []
-            progress = st.progress(0)
-            for i, (idx, row) in enumerate(df_final.iterrows()):
-                ulica_full = " ".join([str(row[c]) for c in addr_cols if pd.notna(row[c])])
-                miasto = clean_text_simple(row[city_col])
-                pna_raw = str(row[pna_col]).replace(".0", "").zfill(5)
-                pna_fmt = f"{pna_raw[:2]}-{pna_raw[2:]}" if len(pna_raw)==5 else ""
-                
-                rej_val = " | ".join([str(row[c]) for c in group_cols])
-                
-                queries = [f"{ulica_full}, {pna_fmt} {miasto}, Polska", f"{ulica_full}, {miasto}, Polska", f"{miasto}, Polska"]
-                found_loc, res_props = None, {}
-                for q in queries:
-                    try:
-                        r = requests.get(f"https://photon.komoot.io/api/?q={q}&limit=1&lang=pl", timeout=5).json()
-                        if r.get('features'):
-                            found_loc = r['features'][0]['geometry']['coordinates']
-                            res_props = r['features'][0]['properties']; break
-                    except: continue
-
-                if found_loc:
-                    pts.append({
-                        "id": hashlib.md5(f"{up.name}{idx}".encode()).hexdigest(),
-                        "display_name": f"{ulica_full}, {miasto}",
-                        "lat": found_loc[1], "lng": found_loc[0],
-                        "source_file": f"Excel: {up.name}",
-                        "NR_REJONU": rej_val,
-                        "MIEJSC_DORECZ": miasto,
-                        "ULICA_DORECZ": ulica_full,
-                        "PNA_DORECZ": pna_fmt,
-                        "NR_PRZ": str(row.get("NR_PRZ", "-")),
-                        "FORMAT": str(row.get("FORMAT", "-")),
-                        "TYP_PRZ": str(row.get("TYP_PRZ", "-")),
-                        "DATA_STATUSU": str(row.get(date_col_name, "")) if date_col_name != "---" else "",
-                        "NAZWA_JD": str(row.get("NAZWA_JD", "-")),
-                        "GMINA": res_props.get('district', res_props.get('city', '-')),
-                        "POWIAT": res_props.get('county', '-')
-                    })
-                progress.progress((i + 1) / len(df_final))
-            
-            if pts:
-                st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
                 recalculate_all(); st.rerun()
 
 # --- 4. INICJALIZACJA ---
@@ -399,11 +273,10 @@ if "delete_pin" in st.query_params:
     recalculate_all(); st.query_params.clear(); st.rerun()
 
 # --- 5. INTERFEJS GÓRNY ---
-c = st.columns([1.2, 1, 1, 1, 1, 1])
+c = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1])
 if c[0].button("📁 Projekty", use_container_width=True): modal_projects()
 if c[1].button("📎 Pliki KML", use_container_width=True): modal_files_kml()
-if c[2].button("📊 Excel", use_container_width=True): modal_files_excel()
-if c[3].button("🏠 Bazy", use_container_width=True):
+if c[2].button("🏠 Bazy", use_container_width=True):
     @st.dialog("Bazy")
     def modal_bases():
         t1, t2 = st.tabs(["➕ Dodaj", "🗑️ Usuń"])
@@ -416,7 +289,7 @@ if c[3].button("🏠 Bazy", use_container_width=True):
                 if st.button("Usuń", type="primary", use_container_width=True): del st.session_state['saved_locations'][sel]; sync_save(); st.rerun()
     modal_bases()
 
-if c[4].button("🗑️ Wyczyść", use_container_width=True):
+if c[3].button("🗑️ Wyczyść", use_container_width=True):
     st.session_state['clear_confirm'] = True
 if st.session_state.get('clear_confirm'):
     @st.dialog("Potwierdź czyszczenie")
@@ -429,7 +302,7 @@ if st.session_state.get('clear_confirm'):
             st.session_state['clear_confirm'] = False; st.rerun()
     confirm_clear()
 
-if c[5].button("🔓 Wyloguj", use_container_width=True): st.query_params.clear(); st.session_state.clear(); st.rerun()
+if c[4].button("🔓 Wyloguj", use_container_width=True): st.query_params.clear(); st.session_state.clear(); st.rerun()
 
 st.divider()
 bl = sorted(list(st.session_state['saved_locations'].keys()))
@@ -494,26 +367,7 @@ if not st.session_state['data'].empty:
                     pts = st.session_state['data'][st.session_state['data']['source_file'] == r_n]
                     f_color = COLOR_MAP.get(COLORS[i % len(COLORS)], 'blue')
                     for _, r in pts.iterrows():
-                        dzien, tydz = get_date_details(r.get('DATA_STATUSU'))
-                        html = f"""
-                        <div style='min-width:200px; font-size:12px;'>
-                            <b>📦 Przesyłka: {r.get('NR_PRZ','-')}</b><br>
-                            <b>Typ:</b> {r.get('TYP_PRZ','-')} ({r.get('FORMAT','-')})<br>
-                            <b>JD:</b> {r.get('NAZWA_JD','-')}<br>
-                            <hr style='margin:5px 0;'>
-                            <b>Rejon:</b> {r.get('NR_REJONU','-')}<br>
-                            <b>Gmina:</b> {r.get('GMINA','-')}<br>
-                            <b>Powiat:</b> {r.get('POWIAT','-')}<br>
-                            <b>Adres:</b> {r.get('MIEJSC_DORECZ','-')}, {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br>
-                            <hr style='margin:5px 0;'>
-                            <b>Dzień:</b> {dzien}<br>
-                            <b>Tydzień:</b> {tydz}<br>
-                            <br>
-                            <a href='?delete_pin={r['id']}' target='_self'>
-                                <button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button>
-                            </a>
-                        </div>
-                        """
+                        html = f"<div style='min-width:200px; font-size:12px;'><b>Przesyłka: {r.get('NR_PRZ','-')}</b><br><b>Typ:</b> {r.get('TYP_PRZ','-')} (Format {r.get('FORMAT','-')})<br><b>Rejon:</b> {r.get('NR_REJONU','-')}<br><b>PNA:</b> {r.get('PNA_DORECZ','-')}<br><b>Miejscowość:</b> {r.get('MIEJSC_DORECZ','-')}<br><b>Adres:</b> {r.get('ULICA_DORECZ','-')} {r.get('NR_DOM_DORECZ','-')}<br><br><a href='?delete_pin={r['id']}' target='_self'><button style='width:100%; cursor:pointer; background:#ff4b4b; color:white; border:none; border-radius:4px; padding:4px;'>Usuń pinezkę</button></a></div>"
                         folium.Marker([r['lat'], r['lng']], icon=folium.Icon(color=f_color), popup=folium.Popup(html, max_width=300)).add_to(m)
                         active_bounds.append([r['lat'], r['lng']])
 
@@ -565,7 +419,6 @@ if not st.session_state['data'].empty:
                     formatted_data.append({
                         'Kolejność': i + 1,
                         'Rejon': "-" if is_edge else row.get('NR_REJONU', '-'),
-                        'Gmina': "-" if is_edge else row.get('GMINA', '-'),
                         'ADRES': build_address(row, i, total_rows),
                         'Przesyłka': "-" if is_edge else row.get('NR_PRZ', '-'),
                         'FORMAT': "-" if is_edge else row.get('FORMAT', '-')
@@ -575,4 +428,4 @@ if not st.session_state['data'].empty:
                 clean_text = df_final.to_csv(index=False, sep='\t')
                 st.download_button(label="📋 KOPIUJ DO EXCELA (Pobierz tekst)", data=clean_text, file_name=f"tabela_{name}.txt", mime="text/plain")
 else:
-    st.info("Wybierz punkt startowy i końcowy z listy, a następnie wgraj pliki KML lub Excel.")
+    st.info("Wybierz punkt startowy i końcowy z listy, a następnie wgraj pliki KML.")
