@@ -7,7 +7,7 @@ import re, math, json, requests, os, time, zlib, base64, hashlib, datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. KONFIGURACJA ---
+# --- 1. KONFIGURACJA ----
 SHEET_ID = "1mTMjUKoHNw-okxpYSAeLsVD7vdxYR1P-ZjelWt9IHAE" 
 st.set_page_config(page_title="Optymalizator Tras", page_icon="🗺️", layout="wide")
 
