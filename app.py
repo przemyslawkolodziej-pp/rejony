@@ -270,81 +270,107 @@ def modal_files_excel():
         df_ex = pd.read_excel(up)
         cols = df_ex.columns.tolist()
         
-        st.write("### 🛠️ Konfiguracja Geokodowania")
+        st.write("### 🛠️ 1. Mapowanie kolumn")
         c1, c2, c3 = st.columns(3)
-        
-        # ZMIANA: multiselect dla ulicy i numeru
-        addr_cols = c1.multiselect(
-            "Kolumny adresu (np. ulica + nr)", 
-            cols, 
-            default=[c for c in ["ULICA_DORECZ", "NR_DOM_DORECZ"] if c in cols] or [cols[0]]
-        )
+        addr_cols = c1.multiselect("Adres (Ulica, Nr)", cols, default=[c for c in ["ULICA_DORECZ", "NR_DOM_DORECZ"] if c in cols] or [cols[0]])
         city_col = c2.selectbox("Miejscowość", cols, index=cols.index("MIEJSC_DORECZ") if "MIEJSC_DORECZ" in cols else 0)
-        pna_col = c3.selectbox("Kolumna PNA", cols, index=cols.index("PNA_DORECZ") if "PNA_DORECZ" in cols else 0)
+        pna_col = c3.selectbox("Kod PNA", cols, index=cols.index("PNA_DORECZ") if "PNA_DORECZ" in cols else 0)
         
-        st.write("### 📂 Konfiguracja Rejonu (Scenariusz)")
-        group_cols = st.multiselect("Z których kolumn zbudować nazwę Rejonu?", cols, default=[cols[0]])
+        st.divider()
+        st.write("### 🔍 2. Filtrowanie danych (Opcjonalne)")
+        st.info("Wybierz wartości, aby ograniczyć import. Jeśli zostawisz puste -> zaimportuje wszystko.")
         
-        if st.button("Uruchom Szybkie Geokodowanie", use_container_width=True):
+        f1, f2, f3 = st.columns(3)
+        
+        # --- FILTR REJONU ---
+        rej_col_name = f1.selectbox("Kolumna Rejonu:", ["---"] + cols)
+        sel_rejs = []
+        if rej_col_name != "---":
+            unique_rejs = sorted(df_ex[rej_col_name].dropna().unique().astype(str))
+            sel_rejs = f1.multiselect("Wybierz konkretne Rejony:", unique_rejs)
+            
+        # --- FILTR DNIA TYGODNIA ---
+        date_col_name = f2.selectbox("Kolumna Daty:", ["---"] + cols)
+        sel_days = []
+        if date_col_name != "---":
+            # Tymczasowo wyliczamy dni tygodnia dla unikalnych dat
+            df_temp = pd.DataFrame({'d': df_ex[date_col_name].dropna().unique()})
+            df_temp['day_name'] = df_temp['d'].apply(lambda x: get_date_details(x)[0])
+            unique_days = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+            available_days = [d for d in unique_days if d in df_temp['day_name'].unique()]
+            sel_days = f2.multiselect("Wybierz dni tygodnia:", available_days)
+
+        # --- FILTR TYGODNIA MIESIĄCA ---
+        sel_weeks = []
+        if date_col_name != "---":
+            df_temp['week_num'] = df_temp['d'].apply(lambda x: str(get_date_details(x)[1]))
+            available_weeks = sorted(df_temp['week_num'].unique())
+            sel_weeks = f3.multiselect("Wybierz nr tygodnia:", available_weeks)
+
+        st.divider()
+        st.write("### 📂 3. Nazwa Rejonu w aplikacji")
+        group_cols = st.multiselect("Z czego zbudować nazwę wyświetlaną na mapie?", cols, default=[rej_col_name] if rej_col_name != "---" else [cols[0]])
+
+        if st.button("Uruchom Import i Geokodowanie", use_container_width=True):
+            # --- LOGIKA FILTROWANIA ---
+            df_final = df_ex.copy()
+            if sel_rejs:
+                df_final = df_final[df_final[rej_col_name].astype(str).isin(sel_rejs)]
+            
+            if date_col_name != "---" and (sel_days or sel_weeks):
+                # Dodajemy kolumny pomocnicze do filtrowania
+                df_final['_d'], df_final['_w'] = zip(*df_final[date_col_name].apply(get_date_details))
+                if sel_days:
+                    df_final = df_final[df_final['_d'].isin(sel_days)]
+                if sel_weeks:
+                    df_final = df_final[df_final['_w'].astype(str).isin(sel_weeks)]
+
+            if df_final.empty:
+                st.error("Brak danych spełniających kryteria filtrów!"); return
+
             pts = []
             progress = st.progress(0)
-            status_text = st.empty()
-            
-            for i, row in df_ex.iterrows():
-                # Łączenie wybranych kolumn adresu spacją (np. "Polna" + "12" -> "Polna 12")
+            for i, (idx, row) in enumerate(df_final.iterrows()):
                 ulica_full = " ".join([str(row[c]) for c in addr_cols if pd.notna(row[c])])
-                ulica_clean = clean_text_simple(ulica_full)
-                
                 miasto = clean_text_simple(row[city_col])
                 pna_raw = str(row[pna_col]).replace(".0", "").zfill(5)
                 pna_fmt = f"{pna_raw[:2]}-{pna_raw[2:]}" if len(pna_raw)==5 else ""
                 
                 rej_val = " | ".join([str(row[c]) for c in group_cols])
                 
-                # Kaskada zapytań do Photona
-                queries = [
-                    f"{ulica_clean}, {pna_fmt} {miasto}, Polska", 
-                    f"{ulica_clean}, {miasto}, Polska", 
-                    f"{miasto}, Polska"
-                ]
-                
+                queries = [f"{ulica_full}, {pna_fmt} {miasto}, Polska", f"{ulica_full}, {miasto}, Polska", f"{miasto}, Polska"]
                 found_loc, res_props = None, {}
                 for q in queries:
                     try:
                         r = requests.get(f"https://photon.komoot.io/api/?q={q}&limit=1&lang=pl", timeout=5).json()
                         if r.get('features'):
                             found_loc = r['features'][0]['geometry']['coordinates']
-                            res_props = r['features'][0]['properties']
-                            break
+                            res_props = r['features'][0]['properties']; break
                     except: continue
 
                 if found_loc:
                     pts.append({
-                        "id": hashlib.md5(f"{up.name}{i}{ulica_full}".encode()).hexdigest(),
+                        "id": hashlib.md5(f"{up.name}{idx}".encode()).hexdigest(),
                         "display_name": f"{ulica_full}, {miasto}",
                         "lat": found_loc[1], "lng": found_loc[0],
                         "source_file": f"Excel: {up.name}",
                         "NR_REJONU": rej_val,
                         "MIEJSC_DORECZ": miasto,
-                        "ULICA_DORECZ": ulica_full, # Tutaj trafia już połączona ulica z numerem
-                        "NR_DOM_DORECZ": "", # Możesz zostawić puste, bo numer jest już w ULICA_DORECZ
+                        "ULICA_DORECZ": ulica_full,
                         "PNA_DORECZ": pna_fmt,
                         "NR_PRZ": str(row.get("NR_PRZ", "-")),
                         "FORMAT": str(row.get("FORMAT", "-")),
                         "TYP_PRZ": str(row.get("TYP_PRZ", "-")),
-                        "DATA_STATUSU": str(row.get("DATA_STATUSU", "")),
+                        "DATA_STATUSU": str(row.get(date_col_name, "")) if date_col_name != "---" else "",
                         "NAZWA_JD": str(row.get("NAZWA_JD", "-")),
                         "GMINA": res_props.get('district', res_props.get('city', '-')),
                         "POWIAT": res_props.get('county', '-')
                     })
-                
-                progress.progress((i + 1) / len(df_ex))
-                status_text.text(f"Przetwarzanie: {i+1}/{len(df_ex)}")
-
+                progress.progress((i + 1) / len(df_final))
+            
             if pts:
                 st.session_state['data'] = pd.concat([st.session_state['data'], pd.DataFrame(pts)], ignore_index=True).drop_duplicates()
-                recalculate_all()
-                st.rerun()
+                recalculate_all(); st.rerun()
 
 # --- 4. INICJALIZACJA ---
 if 'initialized' not in st.session_state:
